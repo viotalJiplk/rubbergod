@@ -13,8 +13,8 @@ import utils
 from buttons.system import Dropdown, SystemView
 from cogs.base import Base
 from config import cooldowns
-from config.app_config import config
 from config.messages import Messages
+from database.error import ErrorLogDB
 from features.error import ErrorLogger
 from features.git import Git
 from permissions import permission_check
@@ -72,7 +72,7 @@ class System(Base, commands.Cog):
         return all_selects
 
     @commands.check(permission_check.is_bot_admin)
-    @commands.slash_command(name="cogs", description=Messages.cogs_brief, guild_ids=[config.guild_id])
+    @commands.slash_command(name="cogs", description=Messages.cogs_brief, guild_ids=[Base.config.guild_id])
     async def cogs(self, inter: disnake.ApplicationCommandInteraction):
         """
         Creates embed with button and select(s) to load/unload/reload cogs.
@@ -94,6 +94,7 @@ class System(Base, commands.Cog):
     @cooldowns.default_cooldown
     @commands.slash_command(name="uptime", description=Messages.uptime_brief)
     async def uptime(self, inter: disnake.ApplicationCommandInteraction):
+        await inter.response.defer()
         now = datetime.now().replace(microsecond=0)
         delta = now - boottime
         count = self.error_log.log_error_date(set=False)
@@ -102,20 +103,27 @@ class System(Base, commands.Cog):
             description=f"{count} days without an accident.",
             color=0xeee657,
         )
+        start_streak, end_streak = ErrorLogDB.get_longest_streak()
         embed.add_field(name=Messages.upsince_title, value=str(boottime))
         embed.add_field(name=Messages.uptime_title, value=str(delta))
+        embed.add_field(name=Messages.uptime_latency, value=f"{round (self.bot.latency * 1000)} ms")
+        embed.add_field(
+            name=Messages.longest_streak,
+            value=f"**{(end_streak - start_streak).days} day(s)**\n{start_streak} — {end_streak}",
+            inline=False
+        )
         self.error_log.set_image(embed, self.bot.user, count)
-        await inter.send(embed=embed)
+        await inter.edit_original_response(embed=embed)
 
     @pull.error
     @cogs.error
     async def on_command_error(self, ctx: commands.Context, error):
         if isinstance(error, commands.errors.CommandInvokeError):
             if isinstance(error.__cause__, commands.errors.ExtensionAlreadyLoaded):
-                await ctx.send(utils.fill_message("cog_is_loaded", cog=error.__cause__.name))
+                await ctx.send(Messages.cog_is_loaded(cog=error.__cause__.name))
                 return True
             elif isinstance(error.__cause__, commands.errors.ExtensionNotLoaded):
-                await ctx.send(utils.fill_message("cog_is_unloaded", cog=error.__cause__.name))
+                await ctx.send(Messages.cog_is_unloaded(cog=error.__cause__.name))
                 return True
 
 

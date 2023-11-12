@@ -3,13 +3,18 @@ import logging
 import sys
 import traceback
 
-from disnake import AllowedMentions, Embed, Intents, TextChannel
+import disnake
+import sqlalchemy
+from disnake import AllowedMentions, Embed, HTTPException, Intents, TextChannel
 from disnake.errors import DiscordServerError
 from disnake.ext import commands
 
-import repository.db_migrations as migrations
+import database.db_migrations as migrations
+from buttons.report import (ReportAnonymView, ReportAnswerOnlyView,
+                            ReportGeneralView, ReportMessageView)
 from config.app_config import config
 from config.messages import Messages
+from database import session
 from features import presence
 from features.error import ErrorLogger
 
@@ -77,6 +82,15 @@ async def on_ready():
         return
     is_initialized = True
 
+    views = [
+        ReportGeneralView(bot),
+        ReportMessageView(bot),
+        ReportAnonymView(bot),
+        ReportAnswerOnlyView(bot)
+    ]
+    for view in views:
+        bot.add_view(view)
+
     bot_room: TextChannel = bot.get_channel(config.bot_room)
     if bot_room is not None:
         await bot_room.send(Messages.on_ready_message)
@@ -86,10 +100,26 @@ async def on_ready():
 
 
 @bot.event
+async def on_button_click(inter: disnake.MessageInteraction):
+    if inter.component.custom_id in ["trash:delete", "bookmark:delete"]:
+        await inter.message.delete()
+
+
+@bot.event
 async def on_error(event, *args, **kwargs):
     e = sys.exc_info()[1]
     if isinstance(e, DiscordServerError) and e.status == 503:
         return
+
+    if isinstance(e, sqlalchemy.exc.InternalError):
+        session.rollback()
+        return
+
+    if isinstance(e, HTTPException):
+        # 50007: Cannot send messages to this user
+        if e.code == 50007:
+            return
+
     channel_out = bot.get_channel(config.bot_dev_channel)
     output = traceback.format_exc()
     print(output)

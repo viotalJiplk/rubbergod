@@ -10,13 +10,9 @@ import requests
 from disnake.ext import commands
 from lxml import etree
 
-import utils
 from cogs.base import Base
-from config.app_config import config
 from config.messages import Messages
-from repository import user_repo
-
-user_r = user_repo.UserRepository()
+from database.verification import ValidPersonDB
 
 
 class Absolvent(Base, commands.Cog):
@@ -32,15 +28,15 @@ class Absolvent(Base, commands.Cog):
     async def diplom(
         self,
         inter: disnake.ApplicationCommandInteraction,
-        degree: str,
-        name: str,
-        surname: str,
-        diploma_number: str,
-        thesis_web_id: int
+        degree: str = commands.Param(choices=["Bc.", "Ing."], description=Messages.absolvent_degree_param),
+        name: str = commands.Param(description=Messages.absolvent_name_param),
+        surname: str = commands.Param(description=Messages.absolvent_surname_param),
+        diploma_number: str = commands.Param(description=Messages.absolvent_diploma_param),
+        thesis_web_id: int = commands.Param(description=Messages.absolvent_thesis_id_param)
     ):
         """Command for diploma verification and honourable role addition
 
-        :param inter: disnake context
+        :param inter: disnake interaction
         :param name: first name (case-sensitive)
         :param surname: last name (case-sensitive)
         :param degree: strictly either "Bc." or "Ing." (case-sensitive)
@@ -49,6 +45,13 @@ class Absolvent(Base, commands.Cog):
             can be discovered via https://dspace.vutbr.cz/handle/11012/19121
         """
         await inter.response.defer(with_message=True, ephemeral=True)
+
+        # check whether the user is verified
+        verify_role = inter.guild.get_role(self.config.verification_role_id)
+        if verify_role not in inter.author.roles:
+            await inter.edit_original_response(Messages.absolvent_not_verified)
+            return
+
         if thesis_web_id == "19121":
             await inter.edit_original_response(Messages.absolvent_id_from_help)
             return
@@ -70,9 +73,13 @@ class Absolvent(Base, commands.Cog):
             return only_ascii
 
         # get "surname name" for bot database fot the current command caller
-        name_from_db = user_r.get_user_by_id(inter.author.id).name
+        name_from_db = ValidPersonDB.get_user_by_id(inter.author.id).name
         # remove diacritics from the user-supplied name
         name_from_user_without_diacritics = remove_accents(f"{surname} {name}")
+
+        if name_from_db is None:
+            await inter.edit_original_response(Messages.absolvent_not_in_db)
+            return
 
         if name_from_db != name_from_user_without_diacritics:
             await inter.edit_original_response(Messages.absolvent_wrong_name)
@@ -125,17 +132,6 @@ class Absolvent(Base, commands.Cog):
                "li[4]/a[.='Fakulta informačních technologií']/text()"
             )
         )
-
-        # await inter.edit_original_response(f"""
-        # DEBUG:
-        # nf: {not_found}
-        # mt: {master_thesis}
-        # bt: {bachelor_thesis}
-        # ta: {thesis_author_without_degree_surname_first}
-        # hd: {habilitation_date}
-        # re: {result}
-        # fa: {faculty}
-        # """)
 
         if "Page cannot be found" in not_found:
             await inter.edit_original_response(Messages.absolvent_thesis_not_found_error)
@@ -198,12 +194,12 @@ class Absolvent(Base, commands.Cog):
             await inter.edit_original_response(Messages.absolvent_diploma_error)
             return
 
-        guild = self.bot.get_guild(config.guild_id)
+        guild = self.bot.get_guild(self.config.guild_id)
         role = None
         if degree == "Bc.":
-            role = disnake.utils.get(guild.roles, id=config.bc_role_id)
+            role = disnake.utils.get(guild.roles, id=self.config.bc_role_id)
         if degree == "Ing.":
-            role = disnake.utils.get(guild.roles, id=config.ing_role_id)
+            role = disnake.utils.get(guild.roles, id=self.config.ing_role_id)
         if role:
             member = guild.get_member(inter.author.id)
             for drop_role in member.roles:
@@ -215,7 +211,7 @@ class Absolvent(Base, commands.Cog):
     @diplom.error
     async def diplom_error(self, inter: disnake.ApplicationCommandInteraction, error):
         await inter.edit_original_response(
-            utils.fill_message("absolvent_help", command=inter.application_command)
+            Messages.absolvent_help(user=inter.author.id)
         )
 
 

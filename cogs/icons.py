@@ -2,41 +2,62 @@
 Cog implementing dynamic icon system. Users can assign themselves icons from a list of roles.
 """
 
+from typing import List, Optional, Union
+
 import disnake
 from disnake.ext import commands
 
 import utils
-from buttons.icon import IconView
+from buttons.general import TrashView
 from cogs.base import Base
-from config.app_config import config
 from config.messages import Messages
 
 
-def remove_prefix(text, prefix):
+def remove_prefix(text, prefix) -> str:
     if text.startswith(prefix):
         return text[len(prefix):]
     return text
 
 
-def icon_name(icon: disnake.Role):
-    return remove_prefix(icon.name, config.icon_role_prefix)
+def icon_name(icon: disnake.Role) -> str:
+    return remove_prefix(icon.name, Base.config.icon_role_prefix)
 
 
-def get_icon_roles(guild: disnake.Guild):
-    return [role for role in guild.roles if role.id in config.icon_roles]
+def icon_emoji(bot: commands.Bot, icon_role: disnake.Role) -> Optional[disnake.PartialEmoji]:
+    emoji = icon_role.emoji
+    if emoji is not None:  # Return Role Emoji if it is a server emoji
+        return emoji
+    icon = icon_name(icon_role)
+    guild = bot.get_guild(Base.config.guild_id)
+    emoji = utils.get_emoji(guild=guild, name=icon)
+    if emoji is not None:
+        return emoji
+    try:
+        rules = Base.config.icon_rules[icon_role.id]
+        emoji_id = rules.get("emoji_id")
+        emoji = bot.get_emoji(emoji_id)
+        return emoji
+    except (AttributeError, KeyError):
+        return None
 
 
-async def can_assign(icon: disnake.Role, user: disnake.Member):
+def get_icon_roles(guild: disnake.Guild) -> List[disnake.Role]:
+    return [role for role in guild.roles if role.id in Base.config.icon_roles]
+
+
+async def can_assign(icon: disnake.Role, user: disnake.Member) -> bool:
     """Whether a given user can have a given icon"""
-    rules = config.icon_rules[icon.id]
+    rules = Base.config.icon_rules[icon.id]
     user_roles = {role.id for role in user.roles}
     allow = rules.get("allow")
     deny = rules.get("deny", [])
-    allowed_by_role = (allow is None or not user_roles.isdisjoint(allow)) and user_roles.isdisjoint(deny)
-    return allowed_by_role and user.id not in deny
+    allowed_by_role = allow is None or not user_roles.isdisjoint(allow)
+    allowed_by_user = allow is None or user.id in allow
+    denied = deny is not None and (not user_roles.isdisjoint(deny) or user.id in deny)
+    return (allowed_by_role or allowed_by_user) and not denied
 
 
-async def do_set_icon(icon: disnake.Role, user: disnake.Member):
+async def do_set_icon(icon: disnake.Role, user: disnake.Member) -> None:
     """Set the icon to the user, removing any previous icons,
     without checking whether the user is allowed to have said icon
     """
@@ -51,8 +72,9 @@ async def do_set_icon(icon: disnake.Role, user: disnake.Member):
 
 
 class IconSelect(disnake.ui.Select):
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, bot: commands.Bot, **kwargs) -> None:
         super().__init__(**kwargs)
+        self.bot = bot
 
     async def callback(self, inter: disnake.MessageInteraction):
         await inter.response.defer(ephemeral=True)
@@ -63,21 +85,22 @@ class IconSelect(disnake.ui.Select):
             return
         user = inter.user
         if await can_assign(icon, user):
-            await inter.edit_original_response(
-                Messages.icon_set_success.format(user=inter.user, icon=icon_name(icon)), view=None
-            )
+            await inter.edit_original_response(Messages.icon_set_success(
+                        user=inter.user,
+                        icon=icon_emoji(self.bot, icon) or icon_name(icon)),
+                        view=None)
             await do_set_icon(icon, user)
         else:
             await inter.edit_original_response(Messages.icon_ui_no_permission)
 
 
-async def icon_autocomp(inter: disnake.ApplicationCommandInteraction, partial: str):
+async def icon_autocomp(inter: disnake.ApplicationCommandInteraction, partial: str) -> str:
     icon_roles = get_icon_roles(inter.guild)
     names = (icon_name(role) for role in icon_roles)
     return [name for name in names if partial.casefold() in name.casefold()]
 
 
-def get_icon_emoji(icon: disnake.Role):
+def get_icon_emoji(icon: disnake.Role) -> Union[str, disnake.Emoji, disnake.PartialEmoji]:
     emoji = getattr(icon, "_icon", None)
     if type(emoji) not in [str, disnake.Emoji, disnake.PartialEmoji]:
         emoji = None
@@ -85,27 +108,31 @@ def get_icon_emoji(icon: disnake.Role):
 
 
 class Icons(Base, commands.Cog):
-    def __init__(self, bot):
+    def __init__(self, bot: commands.Bot):
         super().__init__()
         self.bot = bot
 
-    @utils.PersistentCooldown(command_name="icon", limit=config.icon_ui_cooldown)
-    @commands.slash_command(description=Messages.icon_ui, guild_ids=[config.guild_id])
+    @utils.PersistentCooldown(command_name="icon", limit=Base.config.icon_ui_cooldown)
+    @commands.slash_command(description=Messages.icon_ui, guild_ids=[Base.config.guild_id])
     async def icon(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer(ephemeral=True)
         icon_roles = get_icon_roles(inter.guild)
         user = inter.user
         options = [
             disnake.SelectOption(
-                label=icon_name(icon), value=str(icon.id), emoji=None
+                label=icon_name(icon), value=str(icon.id), emoji=icon_emoji(self.bot, icon)
             )
             for icon in icon_roles
             if await can_assign(icon, user)
         ]
-        view = IconView()
-        for start_i in range(0, len(options), 25):
+        view = TrashView("icon:delete", row=4)      # makes it last row so it's always under the dropdown
+        for row, start_i in enumerate(range(0, len(options), 25)):
+            # 25 is the max number of options per select
             component = IconSelect(
-                placeholder=Messages.icon_ui_choose, options=options[start_i: start_i + 25], row=0,
+                bot=self.bot,
+                placeholder=Messages.icon_ui_choose,
+                options=options[start_i: start_i + 25],
+                row=row,
             )
             view.add_item(component)
         await inter.edit_original_response(view=view)

@@ -11,7 +11,6 @@ from disnake.ext import commands, tasks
 
 import utils
 from cogs.base import Base
-from config.app_config import config
 from config.messages import Messages
 from permissions import room_check
 
@@ -39,7 +38,7 @@ class Nameday(Base, commands.Cog):
                 names = []
                 for i in res:
                     names.append(i["name"])
-                return Messages.name_day_cz.format(name=", ".join(names))
+                return Messages.name_day_cz(name=", ".join(names))
             except (asyncio.exceptions.TimeoutError, aiohttp.client_exceptions.ClientConnectorError):
                 return "Website unreachable"
 
@@ -52,15 +51,15 @@ class Nameday(Base, commands.Cog):
                 names = []
                 for i in res:
                     names.append(i["name"])
-                return Messages.name_day_sk.format(name=", ".join(names))
+                return Messages.name_day_sk(name=", ".join(names))
             except (asyncio.exceptions.TimeoutError, aiohttp.client_exceptions.ClientConnectorError):
                 return "Website unreachable"
 
     async def _birthday(self):
-        headers = {"ApiKey": config.grillbot_api_key, "Author": await self.owner_id()}
+        headers = {"ApiKey": self.config.grillbot_api_key, "Author": await self.owner_id()}
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10), headers=headers) as session:
             try:
-                url = "https://grillbot.cloud/api/user/birthday/today"
+                url = f"{self.config.grillbot_api_url}/user/birthday/today"
                 async with session.get(url) as resp:
                     birthday = await resp.json()
                     return birthday['message']
@@ -85,8 +84,7 @@ class Nameday(Base, commands.Cog):
         name_day_sk = await self._name_day_sk()
         birthday = await self._birthday()
 
-        bot_room = self.bot.get_channel(config.bot_room)
-        await bot_room.send(f"{name_day_cz}\n{name_day_sk}\n{birthday}")
+        await self.bot_room.send(f"{name_day_cz}\n{name_day_sk}\n{birthday}")
 
 
 def setup(bot):

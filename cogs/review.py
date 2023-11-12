@@ -13,11 +13,10 @@ from buttons.embed import EmbedView
 from buttons.review import ReviewView
 from cogs.base import Base
 from config import cooldowns
-from config.app_config import config
 from config.messages import Messages
-from features.review import ReviewManager
+from database.review import ProgrammeDB, ReviewDB, SubjectDB, SubjectDetailsDB
+from features.review import ReviewManager, TierEnum
 from permissions import permission_check
-from repository import review_repo
 
 subjects = []
 programmes = []
@@ -33,14 +32,13 @@ async def autocomp_subjects(inter: disnake.ApplicationCommandInteraction, user_i
 
 
 class Review(Base, commands.Cog):
-    def __init__(self, bot):
+    def __init__(self, bot: commands.Bot):
         global subjects, programmes
         super().__init__()
         self.bot = bot
         self.manager = ReviewManager(bot)
-        self.repo = review_repo.ReviewRepository()
-        subjects = self.repo.get_all_subjects()
-        programmes = self.repo.get_all_programmes()
+        subjects = SubjectDB.get_all()
+        programmes = ProgrammeDB.get_all()
         self.get_all_options()
 
     def get_all_options(self):
@@ -53,21 +51,21 @@ class Review(Base, commands.Cog):
 
     async def check_member(self, inter: disnake.ApplicationCommandInteraction):
         """Check if user is allowed to add/remove new review."""
-        guild = inter.bot.get_guild(config.guild_id)
+        guild = inter.bot.get_guild(self.config.guild_id)
         member = guild.get_member(inter.author.id)
         if member is None:
-            await inter.send(utils.fill_message("review_not_on_server", user=inter.author.mention))
+            await inter.send(Messages.review_not_on_server(user=inter.author.mention))
             return False
         roles = member.roles
         verify = False
         for role in roles:
-            if config.verification_role_id == role.id:
+            if self.config.verification_role_id == role.id:
                 verify = True
-            if role.id in config.review_forbidden_roles:
-                await inter.send(utils.fill_message("review_add_denied", user=inter.author.id))
+            if role.id in self.config.review_forbidden_roles:
+                await inter.send(Messages.review_add_denied(user=inter.author.id))
                 return False
         if not verify:
-            await inter.send(utils.fill_message("review_add_denied", user=inter.author.id))
+            await inter.send(Messages.review_add_denied(user=inter.author.id))
             return False
         return True
 
@@ -75,7 +73,7 @@ class Review(Base, commands.Cog):
     @commands.slash_command(name="review")
     async def reviews(self, inter: disnake.ApplicationCommandInteraction):
         """Group of commands for reviews."""
-        await inter.response.defer()
+        pass
 
     @reviews.sub_command(name="get", description=Messages.review_get_brief)
     async def get(
@@ -84,6 +82,7 @@ class Review(Base, commands.Cog):
         subject: str = commands.Param(autocomplete=autocomp_subjects),
     ):
         """Get reviews"""
+        await inter.response.defer()
         embeds = self.manager.list_reviews(inter.author, subject.lower())
         if embeds is None or len(embeds) == 0:
             await inter.send(Messages.review_wrong_subject)
@@ -97,19 +96,18 @@ class Review(Base, commands.Cog):
         self,
         inter: disnake.ApplicationCommandInteraction,
         subject: str = commands.Param(autocomplete=autocomp_subjects),
-        tier: int = commands.Param(le=4, ge=0, description=Messages.review_tier),
-        text: str = None
+        grade: str = commands.Param(choices=TierEnum._member_names_, description=Messages.review_grade_brief),
+        text: str = commands.Param(),
+        anonymous: bool = commands.Param(default=False)
     ):
         """Add new review for `subject`"""
-        # TODO: use modal in future when disnake 2.8?? released
+        # TODO: use modal in future when select in modal support release
         # await inter.response.send_modal(modal=ReviewModal(self.bot))
+        await inter.response.defer(ephemeral=anonymous)
+        tier = getattr(TierEnum, grade).value
         if not await self.check_member(inter):
             return
-        author = inter.author.id
-        anonym = False
-        if not inter.guild:  # DM
-            anonym = True
-        if not self.manager.add_review(author, subject.lower(), tier, anonym, text):
+        if not self.manager.add_review(inter.author.id, subject.lower(), tier, anonymous, text):
             await inter.send(Messages.review_wrong_subject)
         else:
             await inter.send(Messages.review_added)
@@ -124,15 +122,20 @@ class Review(Base, commands.Cog):
         """Remove review from DB. User is just allowed to remove his own review
         For admin it is possible to use "id" as subject shortcut and delete review by its ID
         """
+        await inter.response.defer()
         if id is not None:
             if permission_check.is_bot_admin(inter, False):
-                self.repo.remove(id)
-                await inter.send(Messages.review_remove_success)
+                review = ReviewDB.get_review_by_id(id)
+                if review:
+                    review.remove()
+                    await inter.send(Messages.review_remove_success)
+                else:
+                    await inter.send(Messages.review_not_found)
                 return
 
             # not admin
             await inter.send(
-                utils.fill_message("review_remove_denied", user=inter.author.id),
+                Messages.review_remove_denied(user=inter.author.id),
                 ephemeral=True
             )
             return
@@ -145,42 +148,44 @@ class Review(Base, commands.Cog):
 
     @reviews.sub_command(name="list", description=Messages.review_list_brief)
     async def author_list(self, inter: disnake.ApplicationCommandInteraction):
+        await inter.response.defer()
         embed = self.manager.authored_reviews(inter.author.id)
         await inter.send(embed=embed)
 
     @cooldowns.short_cooldown
-    @commands.group()
+    @commands.slash_command(name="subject")
     @commands.check(permission_check.is_bot_admin)
-    async def subject(self, ctx):
+    async def subject(self, inter: disnake.ApplicationCommandInteraction):
         """Group of commands for managing subjects in DB"""
-        if ctx.invoked_subcommand is None:
-            await ctx.reply(Messages.subject_format)
-            return
+        await inter.response.defer()
 
-    @subject.command(brief=Messages.subject_update_biref)
-    async def update(self, ctx):
+    @subject.sub_command(name="update", description=Messages.subject_update_biref)
+    async def update(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        overwrite: bool = commands.Param(description=Messages.subject_update_overwrite_brief, default=False),
+    ):
         """Updates subjects from web"""
         global subjects, programmes
         programme_details_link = "https://www.fit.vut.cz/study/"
         reply = ""
-        async with ctx.channel.typing():
-            # bachelor
-            url = f"{programme_details_link}program/{config.subject_bit_id}/.cs"
-            if not self.manager.update_subject_types(url, False):
-                reply += Messages.subject_update_error.format(url=url)
-            # engineer
-            ids_list = list(range(config.subject_mit_id_start, config.subject_mit_id_end))
-            for id in ids_list + config.subject_mit_id_rnd:
-                url = f"{programme_details_link}field/{id}/.cs"
-                if not self.manager.update_subject_types(url, True):
-                    reply += Messages.subject_update_error.format(url=url)
-            # sports
-            self.manager.update_sport_subjects()
-            subjects = self.repo.get_all_subjects()
-            programmes = self.repo.get_all_programmes()
-            self.get_all_options()
-            reply += Messages.subject_update_success
-            await ctx.reply(reply)
+        # bachelor
+        url = f"{programme_details_link}program/{self.config.subject_bit_id}/.cs"
+        if not self.manager.update_subject_types(url, False, overwrite):
+            reply += Messages.subject_update_error(url=url)
+        # engineer
+        ids_list = list(range(self.config.subject_mit_id_start, self.config.subject_mit_id_end))
+        for id in ids_list + self.config.subject_mit_id_rnd:
+            url = f"{programme_details_link}field/{id}/.cs"
+            if not self.manager.update_subject_types(url, True, overwrite):
+                reply += Messages.subject_update_error(url=url)
+        # sports
+        self.manager.update_sport_subjects()
+        subjects = SubjectDB.get_all()
+        programmes = ProgrammeDB.get_all()
+        self.get_all_options()
+        reply += Messages.subject_update_success
+        await inter.edit_original_response(reply)
 
     @commands.slash_command(name="wtf", description=Messages.shortcut_brief)
     async def shortcut(
@@ -189,21 +194,21 @@ class Review(Base, commands.Cog):
         shortcut: str = commands.Param(autocomplete=autocomp_subjects_programmes),
     ):
         """Informations about subject specified by its shortcut"""
-        programme = self.repo.get_programme(shortcut.upper())
+        programme = ProgrammeDB.get(shortcut.upper())
         if programme:
             embed = disnake.Embed(title=programme.shortcut, description=programme.name)
             embed.add_field(name="Link", value=programme.link)
         else:
-            subject = self.repo.get_subject_details(shortcut)
+            subject = SubjectDetailsDB.get(shortcut)
             if not subject:
-                subject = self.repo.get_subject_details(f"TV-{shortcut}")
+                subject = SubjectDetailsDB.get(f"TV-{shortcut}")
                 if not subject:
                     await inter.response.send_message(Messages.review_wrong_subject)
                     return
             embed = disnake.Embed(title=subject.shortcut, description=subject.name)
             if subject.semester == "L":
                 semester_value = "Letní"
-            if subject.semester == "Z":
+            elif subject.semester == "Z":
                 semester_value = "Zimní"
             else:
                 semester_value = "Zimní, Letní"
@@ -252,19 +257,15 @@ class Review(Base, commands.Cog):
 
         author = inter.author
         if not inter.guild:  # DM
-            guild = self.bot.get_guild(config.guild_id)
+            guild = self.bot.get_guild(self.config.guild_id)
             author = guild.get_member(author.id)
         if not year:
             for role in author.roles:
                 if any(deg in role.name for deg in ["BIT", "MIT"]):
-                    if role.name == "4BIT+":
-                        year = "3BIT"
-                    elif role.name == "0BIT":
+                    if role.name == "0BIT":
                         year = "1BIT"
                     elif role.name == "0MIT":
                         year = "1MIT"
-                    elif role.name == "3MIT+":
-                        year = "2MIT"
                     else:
                         year = role.name
                     break
@@ -287,13 +288,16 @@ class Review(Base, commands.Cog):
             embed.add_field(name="Ročník", value=year)
         utils.add_author_footer(embed, author)
 
-        pages_total = self.repo.get_tierboard_page_count(type, sem, degree, year)
+        pages_total = SubjectDetailsDB.get_tierboard_page_count(type, sem, degree, year)
         for page in range(pages_total):
-            board = self.repo.get_tierboard(type, sem, degree, year, page*10)
+            board = SubjectDetailsDB.get_tierboard(type, sem, degree, year, page*10)
             output = ""
             cnt = 1
             for line in board:
-                output += f"{cnt} - **{line.shortcut}**: {round(line.avg_tier, 1)}\n"
+                # grade format: "B (1.7)"
+                grade_num = TierEnum.tier_to_grade_num(line.avg_tier)
+                grade = f"{TierEnum(round(line.avg_tier)).name}({round(grade_num, 1)})"
+                output += f"{cnt} - **{line.shortcut}**: {grade}\n"
                 cnt += 1
             embed.description = output
             embeds.append(copy.copy(embed))
@@ -307,5 +311,5 @@ class Review(Base, commands.Cog):
         view.message = await inter.original_message()
 
 
-def setup(bot):
+def setup(bot: commands.Bot):
     bot.add_cog(Review(bot))

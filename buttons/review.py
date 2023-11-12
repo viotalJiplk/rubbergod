@@ -3,30 +3,30 @@ from typing import List
 import disnake
 
 import utils
-from buttons.embed import EmbedView
+from buttons.embed import EmbedView, ViewRowFull
 from config.messages import Messages
+from database.review import ReviewDB, ReviewRelevanceDB
 from features.review import ReviewManager
-from repository import review_repo
 
 
 class ReviewView(EmbedView):
 
-    def __init__(self, author: disnake.User, bot: disnake.Client, embeds: List[disnake.Embed]):
+    def __init__(self, author: disnake.User, bot: disnake.Client, embeds: List[disnake.Embed], page: int = 1):
+        self.bot = bot
         self.manager = ReviewManager(bot)
-        self.repo = review_repo.ReviewRepository()
         self.total_pages = len(embeds)
-        super().__init__(author, embeds, row=1, end_arrow=False, timeout=300)
+        super().__init__(author, embeds, row=1, end_arrow=False, timeout=300, page=page)
         self.check_text_pages()
         # if there aren't any reviews remove buttons
         if len(self.embed.fields) < 2:
-            to_remove = []
             for child in self.children:
-                to_remove.append(child)
-            for button in to_remove:
-                self.remove_item(button)
+                child.disabled = True
 
     def check_text_pages(self):
-        if len(self.embed.fields) > 3 and self.embed.fields[3].name == "Text page":
+        if (
+            len(self.embed.fields) > 3
+            and self.embed.fields[3].name == Messages.review_text_page_label
+        ):
             self.add_item(
                 disnake.ui.Button(
                     emoji="🔽",
@@ -44,25 +44,16 @@ class ReviewView(EmbedView):
                 )
             )
         else:
-            to_remove = []
             for child in self.children:
                 if "text" in child.custom_id:
-                    to_remove.append(child)
-            for button in to_remove:
-                self.remove_item(button)
-
-    def add_item(self, item: disnake.ui.Item) -> None:
-        for child in self.children:
-            if item.emoji == child.emoji:
-                return
-        return super().add_item(item)
+                    child.disabled = True
 
     @property
     def review_id(self):
         return self.embed.footer.text.split("|")[-1][5:]
 
     async def handle_vote(self, interaction: disnake.MessageInteraction, vote: bool = None):
-        review = self.repo.get_review_by_id(self.review_id)
+        review = ReviewDB.get_review_by_id(self.review_id)
         if review:
             member_id = str(interaction.author.id)
             if member_id == review.member_ID:
@@ -71,7 +62,7 @@ class ReviewView(EmbedView):
             if vote is not None:
                 self.manager.add_vote(self.review_id, vote, member_id)
             else:
-                self.repo.remove_vote(self.review_id, member_id)
+                ReviewRelevanceDB.remove_vote(self.review_id, member_id)
             self.embed = self.manager.update_embed(self.embed, review)
             await interaction.response.edit_message(embed=self.embed)
 
@@ -97,18 +88,27 @@ class ReviewView(EmbedView):
             return False
         elif "review" not in interaction.data.custom_id:
             # pagination interaction from super class
-            await super().interaction_check(interaction)
-            if not ((self.perma_lock or self.locked) and interaction.author.id != self.author.id):
-                self.check_text_pages()
+            if await super().interaction_check(interaction) is not False:
+                # pagination has changed the page
+                try:
+                    self.check_text_pages()
+                    view = self
+                except ViewRowFull:
+                    # there was an issue while adding buttons; recreate view
+                    view = ReviewView(self.author, self.bot, self.embeds, page=self.page)
+                    # set the page of new view to the current one
                 # update view
-                await interaction.edit_original_response(view=self)
+                await interaction.edit_original_response(view=view)
             return False
-        elif "text" in interaction.data.custom_id and self.embed.fields[3].name == "Text page":
+        elif (
+            "text" in interaction.data.custom_id and
+            self.embed.fields[3].name == Messages.review_text_page_label
+        ):
             if (self.perma_lock or self.locked) and interaction.author.id != self.author.id:
                 await interaction.send(Messages.embed_not_author, ephemeral=True)
                 return False
             # text page pagination
-            review = self.repo.get_review_by_id(self.review_id)
+            review = ReviewDB.get_review_by_id(self.review_id)
             if review:
                 pages = self.embed.fields[3].value.split("/")
                 text_page = int(pages[0])

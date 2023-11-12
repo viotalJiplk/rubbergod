@@ -3,7 +3,7 @@ import os
 import re
 import time
 from datetime import datetime, timezone
-from typing import Callable, Iterable, Literal, Optional, Union
+from typing import Callable, Iterable, List, Literal, Optional, Tuple, Union
 
 import disnake
 from disnake import Emoji, Member, PartialEmoji
@@ -13,7 +13,7 @@ from sqlalchemy.schema import Table
 
 from config.app_config import config
 from config.messages import Messages
-from repository.database import cooldown, session
+from database import cooldown, session
 
 
 def generate_mention(user_id):
@@ -43,34 +43,6 @@ def has_role(user, role_name: str):
         return None
 
     return role_name.lower() in [x.name.lower() for x in user.roles]
-
-
-def fill_message(message_name, *args, **kwargs):
-    """Fills message template from messages by attempting to get the attr.
-    :param message_name: {str} message template name
-    :kwargs: {dict} data for formatting the template
-    :return: filled template
-    """
-
-    # Convert username/admin to a mention
-    if "user" in kwargs:
-        kwargs["user"] = generate_mention(kwargs["user"])
-
-    if "admin" in kwargs:
-        kwargs["admin"] = generate_mention(kwargs["admin"])
-
-    to_escape = ["role", "not_role", "line"]
-
-    for arg in to_escape:
-        if arg in kwargs:
-            kwargs[arg] = disnake.utils.escape_mentions(kwargs[arg])
-
-    # Attempt to get message template and fill
-    try:
-        template = getattr(Messages, message_name)
-        return template.format(*args, **kwargs)
-    except AttributeError:
-        raise ValueError("Invalid template {}".format(message_name))
 
 
 def pagination_next(id: str, page: int, max_page: int, roll_around: bool = True):
@@ -128,8 +100,13 @@ def split(array, k) -> list:
     return lists
 
 
-def add_author_footer(embed: disnake.Embed, author: disnake.User,
-                      set_timestamp=True, additional_text: Iterable[str] = []):
+def add_author_footer(
+    embed: disnake.Embed,
+    author: disnake.User,
+    set_timestamp=True,
+    additional_text: Iterable[str] = [],
+    anonymous: bool = False
+):
     """
     Adds footer to the embed with author name and icon from ctx.
 
@@ -137,13 +114,21 @@ def add_author_footer(embed: disnake.Embed, author: disnake.User,
     :param embed: disnake.Embed object
     :param set_timestamp: bool, should the embed's timestamp be set
     :param additional_text: Iterable of strings that will be joined with author name by pipe symbol, eg.:
-    "john#2121 | text1 | text2".
+    :param anonymous: bool, show author as Anonymous
+    "john#2121 | text1 | text2" or "Anonymous | text1 | text2"
     """
 
     if set_timestamp:
         embed.timestamp = datetime.now(tz=timezone.utc)
 
-    embed.set_footer(icon_url=author.display_avatar.url, text=' | '.join((str(author), *additional_text)))
+    if anonymous:
+        display_name = "Anonymous"
+        display_avatar = author.default_avatar.url
+    else:
+        display_name = author
+        display_avatar = author.display_avatar.url
+
+    embed.set_footer(icon_url=display_avatar, text=' | '.join((str(display_name), *additional_text)))
 
 
 def get_emoji(guild: disnake.Guild, name: str) -> Optional[disnake.Emoji]:
@@ -292,20 +277,20 @@ class PersistentCooldown:
         self.limit = limit * 1000  # convert to ms
 
     async def check_cooldown(self, inter: disnake.ApplicationCommandInteraction) -> None:
-        current_cooldown = session.query(cooldown.Cooldown).get(
+        current_cooldown = session.query(cooldown.CooldownDB).get(
             dict(command_name=self.command_name, user_id=str(inter.user.id))
         )
         now = int(time.time() * 1000)
         if current_cooldown is None:
             session.add(
-                cooldown.Cooldown(
+                cooldown.CooldownDB(
                     command_name=self.command_name,
                     user_id=str(inter.user.id),
                     timestamp=now,
                 )
             )
         elif (time_passed := now - current_cooldown.timestamp) < self.limit:
-            raise PCommandOnCooldown(Messages.cooldown.format((self.limit - time_passed) / 1000))
+            raise PCommandOnCooldown(Messages.cooldown(time=(self.limit - time_passed) / 1000))
         else:
             current_cooldown.timestamp = now
         session.commit()
@@ -392,3 +377,37 @@ async def get_or_fetch_channel(bot, channel_id) -> disnake.TextChannel:
     if channel is None:
         channel: disnake.TextChannel = await bot.fetch_channel(channel_id)
     return channel
+
+
+async def parse_attachments(
+    message: disnake.Message
+) -> Tuple[List[disnake.File], List[disnake.File], List[disnake.Attachment]]:
+    """Parse attachments from message and return them as lists of disnake files
+    and if they are over 25MB as attachments.
+
+    Returns
+    -------
+    Returns three lists containing disnake files or attachments.
+    - first list contains images
+    - second list contains files
+    - third list contains attachments that are over 25MB and can't be uploaded
+    """
+
+    images = []
+    files = []
+    attachments_too_big = []
+
+    if not message.attachments:
+        return [], [], []
+
+    for attachment in message.attachments:
+        if attachment.size > 25000000:      # 25MB
+            attachments_too_big.append(attachment)
+            continue
+
+        if "image" in attachment.content_type:
+            images.append(await attachment.to_file())
+        else:
+            files.append(await attachment.to_file())
+
+    return images, files, attachments_too_big

@@ -1,4 +1,5 @@
 import asyncio
+from typing import List, Optional, Tuple, Union
 
 import disnake
 from disnake import Emoji
@@ -9,11 +10,11 @@ import utils
 from cogs.grillbotapi import GrillbotApi
 from config.app_config import config as cfg
 from config.messages import Messages
+from database.karma import KarmaDB, KarmaEmojiDB
 from features.base_feature import BaseFeature
-from repository.karma_repo import KarmaRepository
 
 
-def test_emoji(db_emoji: bytearray, server_emoji: Emoji):
+def test_emoji(db_emoji: bytearray, server_emoji: Emoji) -> bool:
     try:
         custom_emoji = int(db_emoji)
         return custom_emoji == server_emoji.id
@@ -21,26 +22,26 @@ def test_emoji(db_emoji: bytearray, server_emoji: Emoji):
         return False
 
 
-def is_unicode(text):
+def is_unicode(text: str) -> bool:
     demojized = demojize(text)
-    if demojized.count(':') != 2:
+    if demojized.count(":") != 2:
         return False
-    if demojized.split(':')[2] != '':
+    if demojized.split(":")[2] != "":
         return False
     return demojized != text
 
 
 class Karma(BaseFeature):
-    def __init__(self, bot: Bot, karma_repository: KarmaRepository):
+    def __init__(self, bot: Bot):
         super().__init__(bot)
-        self.repo = karma_repository
         self.grillbot_api = GrillbotApi(bot)
 
-    async def emoji_process_vote(self, inter, emoji):
+    async def emoji_process_vote(
+        self, inter: disnake.ApplicationCommandInteraction, emoji: Union[Emoji, str]
+    ) -> Optional[int]:
         delay = cfg.vote_minutes * 60
-        message = utils.fill_message("karma_vote_message", emote=str(emoji))
-        message += '\n'
-        message += utils.fill_message("karma_vote_info", delay=str(delay//60), minimum=str(cfg.vote_minimum))
+        message = Messages.karma_vote_message(emote=str(emoji))
+        message += Messages.karma_vote_info(delay=str(delay // 60), minimum=str(cfg.vote_minimum))
         message = await inter.channel.send(message)
         await inter.send(Messages.karma_revote_started)
         await message.add_reaction("✅")
@@ -72,103 +73,82 @@ class Karma(BaseFeature):
         else:
             return 0
 
-    async def emoji_vote_value(self, inter):
-        emojis = self.repo.get_all_emojis()
+    async def emoji_vote_value(self, inter: disnake.ApplicationCommandInteraction) -> None:
+        emojis = KarmaEmojiDB.get_all_emojis()
 
         for server_emoji in inter.guild.emojis:
             if not server_emoji.animated:
-                e = list(
-                    filter(
-                        lambda x: test_emoji(x.emoji_ID, server_emoji),
-                        emojis))
+                e = list(filter(lambda x: test_emoji(x.emoji_ID, server_emoji), emojis))
 
                 if len(e) == 0:
-                    self.repo.set_emoji_value(server_emoji, 0)
-                    vote_value = await self.emoji_process_vote(inter.channel,
-                                                               server_emoji)
+                    KarmaEmojiDB.set_emoji_value(server_emoji, 0)
+                    vote_value = await self.emoji_process_vote(inter, server_emoji)
                     emoji = server_emoji  # Save for use outside loop
                     break
         else:
-            await inter.channel.send(Messages.karma_vote_allvoted)
+            await inter.send(Messages.karma_vote_allvoted)
             return
 
         if vote_value is None:
-            self.repo.remove_emoji(emoji)
+            KarmaEmojiDB.remove_emoji(emoji)
             await inter.channel.send(
-                utils.fill_message(
-                    "karma_vote_notpassed",
-                    emote=str(emoji), minimum=str(cfg.vote_minimum)
-                )
+                Messages.karma_vote_notpassed(emote=str(emoji), minimum=str(cfg.vote_minimum))
             )
 
         else:
-            self.repo.set_emoji_value(emoji, vote_value)
-            await inter.channel.send(
-                utils.fill_message(
-                    "karma_vote_result",
-                    emote=str(emoji), result=str(vote_value)
-                )
-            )
+            KarmaEmojiDB.set_emoji_value(emoji, vote_value)
+            await inter.channel.send(Messages.karma_vote_result(emote=str(emoji), result=str(vote_value)))
 
-    async def emoji_revote_value(self, inter, emoji):
+    async def emoji_revote_value(
+        self, inter: disnake.ApplicationCommandInteraction, emoji: Union[Emoji, str]
+    ) -> None:
         if not is_unicode(emoji):
             try:
-                emoji_id = int(emoji.split(':')[2][:-1])
+                emoji_id = int(emoji.split(":")[2][:-1])
                 emoji = await inter.guild.fetch_emoji(emoji_id)
             except (ValueError, IndexError):
                 await inter.send(Messages.karma_revote_not_emoji)
                 return
             except disnake.NotFound:
-                await inter.send(utils.fill_message("emote_not_found", emote=emoji))
+                await inter.send(Messages.emote_not_found(emote=emoji))
                 return
 
         vote_value = await self.emoji_process_vote(inter, emoji)
 
         if vote_value is not None:
-            self.repo.set_emoji_value(emoji, vote_value)
-            await inter.channel.send(
-                utils.fill_message(
-                    "karma_vote_result",
-                    emote=str(emoji), result=str(vote_value)
-                )
-            )
+            KarmaEmojiDB.set_emoji_value(emoji, vote_value)
+            await inter.channel.send(Messages.karma_vote_result(emote=str(emoji), result=str(vote_value)))
         else:
             await inter.channel.send(
-                utils.fill_message(
-                    "karma_vote_notpassed",
-                    emote=str(emoji), minimum=str(cfg.vote_minimum)
-                )
+                Messages.karma_vote_notpassed(emote=str(emoji), minimum=str(cfg.vote_minimum))
             )
 
-    async def emoji_get_value(self, inter, emoji, ephemeral):
+    async def emoji_get_value(
+        self, inter: disnake.ApplicationCommandInteraction, emoji: Union[Emoji, str], ephemeral: bool
+    ) -> None:
         if not is_unicode(emoji):
             try:
-                emoji_id = int(emoji.split(':')[2][:-1])
+                emoji_id = int(emoji.split(":")[2][:-1])
                 emoji = await inter.channel.guild.fetch_emoji(emoji_id)
             except (ValueError, IndexError):
                 await inter.response.send_message(Messages.karma_get_format)
                 return
             except disnake.NotFound:
-                await inter.response.send_message(
-                    utils.fill_message("emote_not_found", emote=emoji),
-                    ephemeral=ephemeral
-                )
+                await inter.response.send_message(Messages.emote_not_found(emote=emoji), ephemeral=ephemeral)
                 return
 
-        val = self.repo.emoji_value_raw(emoji)
+        val = KarmaEmojiDB.emoji_value_raw(emoji)
 
         if val is not None:
             await inter.response.send_message(
-                utils.fill_message("karma_get", emote=str(emoji), value=str(val)),
-                ephemeral=ephemeral
+                Messages.karma_get(emote=str(emoji), value=str(val)), ephemeral=ephemeral
             )
         else:
             await inter.response.send_message(
-                utils.fill_message("karma_get_emote_not_voted", emote=str(emoji)),
-                ephemeral=ephemeral
+                Messages.karma_get_emote_not_voted(emote=str(emoji)), ephemeral=ephemeral
             )
 
-    async def __make_emoji_list(self, guild, emojis):
+    async def __make_emoji_list(self, guild: disnake.Guild, emojis: List[str]) -> Tuple[List[str], bool]:
         message = []
         line = ""
         is_error = False
@@ -209,23 +189,25 @@ class Karma(BaseFeature):
             except disnake.NotFound:
                 is_error = True
                 if isinstance(emoji_id, bytearray):
-                    self.repo.remove_emoji(emoji_id.decode())
+                    KarmaEmojiDB.remove_emoji(emoji_id.decode())
                 else:
-                    self.repo.remove_emoji(str(emoji_id))
+                    KarmaEmojiDB.remove_emoji(str(emoji_id))
 
         message.append(line)
         message = [line for line in message if line != ""]
         return message, is_error
 
-    async def emoji_list_all_values(self, inter, ephemeral):
+    async def emoji_list_all_values(
+        self, inter: disnake.ApplicationCommandInteraction, ephemeral: bool
+    ) -> None:
         error = False
-        for value in ['1', '-1']:
+        for value in ["1", "-1"]:
             emojis, is_error = await self.__make_emoji_list(
-                    inter.guild,
-                    self.repo.get_ids_of_emojis_valued(value))
+                inter.guild, KarmaEmojiDB.get_ids_of_emojis_valued(value)
+            )
             error |= is_error
             try:
-                await inter.followup.send("Hodnota " + value + ":", ephemeral=ephemeral)
+                await inter.followup.send(f"Hodnota {value}:", ephemeral=ephemeral)
                 for line in emojis:
                     await inter.followup.send(line, ephemeral=ephemeral)
             except disnake.errors.HTTPException:
@@ -235,49 +217,47 @@ class Karma(BaseFeature):
             bot_dev_channel = await self.bot.fetch_channel(cfg.bot_dev_channel)
             await bot_dev_channel.send(Messages.karma_get_missing)
 
-    async def karma_give(self, inter, members, karma):
+    async def karma_give(
+        self, inter: disnake.ApplicationCommandInteraction, members: List[disnake.Member], karma: int
+    ) -> None:
         members = await utils.get_members_from_tag(inter.guild, members)
         for member in members:
-            members_update = self.repo.update_karma(member.id, inter.author.id, karma)
-            await self.grillbot_api.post_karma_store(members_update)
+            KarmaDB.update_karma(member.id, inter.author.id, karma)
         if karma >= 0:
             await inter.send(
-                Messages.karma_give_success.format(
-                    user=" ".join([member.mention for member in members]),
-                    karma=karma
+                Messages.karma_give_success(
+                    user_list=" ".join([member.mention for member in members]), karma=karma
                 )
             )
         else:
             await inter.send(
-                Messages.karma_give_negative_success.format(
-                    user=" ".join([member.mention for member in members]),
-                    karma=karma
+                Messages.karma_give_negative_success(
+                    user_list=" ".join([member.mention for member in members]), karma=karma
                 )
             )
 
-    async def karma_transfer(self, inter, from_user, to_user):
-        transfered, members_update = self.repo.transfer_karma(from_user, to_user)
+    async def karma_transfer(
+        self, inter: disnake.ApplicationCommandInteraction, from_user: disnake.User, to_user: disnake.User
+    ) -> None:
+        transfered = KarmaDB.transfer_karma(from_user.id, to_user.id)
         if transfered is None:
-            await inter.send(Messages.karma_transer_user_no_karma.format(user=from_user))
+            await inter.send(Messages.karma_transer_user_no_karma(user=from_user))
             return
 
-        formated_message = utils.fill_message(
-            "karma_transfer_complete",
+        formated_message = Messages.karma_transfer_complete(
             from_user=from_user.name,
             to_user=to_user.name,
             karma=transfered.karma,
             positive=transfered.positive,
-            negative=transfered.negative
+            negative=transfered.negative,
         )
-        await self.grillbot_api.post_karma_store(members_update)
         await inter.send(formated_message)
 
-    def karma_get(self, author, target=None):
+    def karma_get(self, author: disnake.Member, target: Optional[disnake.Member] = None) -> str:
         if target is None:
             target = author
-        k = self.repo.get_karma(target.id)
-        return utils.fill_message(
-            "karma",
+        k = KarmaDB.get_karma(target.id)
+        return Messages.karma(
             user=author.id,
             karma=k.karma.value,
             order=k.karma.position,
@@ -285,52 +265,52 @@ class Karma(BaseFeature):
             karma_pos=k.positive.value,
             karma_pos_order=k.positive.position,
             karma_neg=k.negative.value,
-            karma_neg_order=k.negative.position
+            karma_neg_order=k.negative.position,
         )
 
-    async def message_karma(self, author: disnake.User, msg: disnake.Message):
+    async def message_karma(self, author: disnake.User, msg: disnake.Message) -> disnake.Embed:
         reactions = msg.reactions
-        color = 0x6d6a69
-        output = {'-1': [], '1': [], '0': []}
+        color = 0x6D6A69
+        output = {"-1": [], "1": [], "0": []}
         karma = 0
         for react in reactions:
             emoji = react.emoji
-            val = self.repo.emoji_value_raw(emoji)
+            val = KarmaEmojiDB.emoji_value_raw(emoji)
             if val == 1:
-                output['1'].append(emoji)
+                output["1"].append(emoji)
                 karma += react.count
                 async for user in react.users():
                     if user.id == msg.author.id:
                         karma -= 1
                         break
             elif val == -1:
-                output['-1'].append(emoji)
+                output["-1"].append(emoji)
                 karma -= react.count
                 async for user in react.users():
                     if user.id == msg.author.id:
                         karma += 1
                         break
             else:
-                output['0'].append(emoji)
-        embed = disnake.Embed(title='Karma zprávy')
+                output["0"].append(emoji)
+        embed = disnake.Embed(title="Karma zprávy")
         embed.add_field(name="Zpráva", value=msg.jump_url, inline=False)
-        for key in ['1', '-1', '0']:
+        for key in ["1", "-1", "0"]:
             if output[key]:
                 message = ""
                 for emoji in output[key]:
-                    message += str(emoji) + ' '
-                if key == '1':
-                    name = 'Pozitivní'
-                elif key == '0':
-                    name = 'Neutrální'
+                    message += str(emoji) + " "
+                if key == "1":
+                    name = "Pozitivní"
+                elif key == "0":
+                    name = "Neutrální"
                 else:
-                    name = 'Negativní'
+                    name = "Negativní"
                 embed.add_field(name=name, value=message, inline=False)
         if karma > 0:
-            color = 0x34cb0b
+            color = 0x34CB0B
         elif karma < 0:
-            color = 0xcb410b
+            color = 0xCB410B
         embed.color = color
-        embed.add_field(name='Celková karma za zprávu:', value=karma, inline=False)
+        embed.add_field(name="Celková karma za zprávu:", value=karma, inline=False)
         utils.add_author_footer(embed, author)
         return embed

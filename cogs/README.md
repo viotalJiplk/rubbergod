@@ -43,6 +43,15 @@ Cog controlling bookmarks. The bot will send copy of message to user.\
     - message_command "Bookmark"
 ---
 
+### [Contest](contest.py)
+
+Cog for handling vote reactions for contests.\
+**Commands:**
+
+    - /contest calculate message
+    - /contest winners
+---
+
 ### [DynamicConfig](dynamicconfig.py)
 
 Cog for dynamically changing config.\
@@ -97,7 +106,7 @@ Cog implementing management of year roles and database of user logins.\
 **Commands:**
 
     - ?role_check
-    - ?increment_roles
+    - /increment_roles
     - ?update_db
     - ?get_db
     - ?get_user_login
@@ -123,6 +132,7 @@ Cog containing commands that call random APIs for fun things.\
     - /duck
     - /dadjoke
     - /yo_mamajoke
+    - /fuchs
 ---
 
 ### [Gif](gif.py)
@@ -177,6 +187,7 @@ Cog containing commands that get basic information from other sources.\
 
     - /urban
     - /pocasi
+    - /kreditovy_strop
 ---
 
 ### [IOS](ios.py)
@@ -236,7 +247,16 @@ Cog for handling memes with X number of reactions to be reposted to a specific c
 **Commands:**
 
     - /better-meme leaderboard
+---
 
+### [Message](message.py)
+
+Cog for sending and managing messages sent by bot.\
+**Commands:**
+
+    - /message send
+    - /message resend
+    - /message edit
 ---
 
 ### [Moderation](moderation.py)
@@ -247,7 +267,6 @@ Implemented logging for tagging @mods.\
 
     - /slowmode set
     - /slowmode remove
-
 ---
 
 ### [Nameday](nameday.py)
@@ -260,7 +279,6 @@ Cog for sending name days and birthdays.\
 **Tasks:**
 
     - send_names
-
 ---
 
 ### [Random](random.py)
@@ -271,13 +289,24 @@ Implementing commands using random module.\
     - /pick
     - /flip
     - /roll
-
 ---
 
 ### [Reactions](reactions.py)
 
 Cog for handling reactions and delegating to specific cog.
 
+---
+
+### [Report](report.py)
+
+Cog implementing anonymous reporting from users.
+**Commands:**
+
+    - /report general
+    - /report message
+    - /report google_form
+    - /report_mod unban
+    - message_command Report message
 ---
 
 ### [Review](review.py)
@@ -310,6 +339,10 @@ Cog implementing channels and roles management. Copying/creating channels with p
     - /channel copy
     - /channel clone
     - /channel create
+    - /channel get_overwrites
+    - /channel overwrite_to_role
+    - /channel role_to_overwrites
+    - /remove_exclusive_roles
 ---
 
 ### [StreamLinks](streamlinks.py)
@@ -334,14 +367,12 @@ Cog implementing information about office hours of the study department.\
 
 ### [Subscriptions](subscriptions.py)
 
-Cog implementing subscription to allowed channels. Subscribed users will receive notifications about new messages if they are offline.\
+Cog implementing subscriptions to forum posts based on their tags. \
 **Commands:**
 
-    - /subscription subscribe
-    - /subscription unsubscribe
-    - /subscription list
-    - /subscription channel
-    - /subscription user
+    - /subscriptions add
+    - /subscriptions remove
+    - /subscriptions list
 ---
 
 ### [System](system.py)

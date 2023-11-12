@@ -6,6 +6,7 @@ from disnake.ext import commands
 
 import utils
 from config.app_config import config
+from config.messages import Messages
 from features.error import ErrorLogger
 from permissions import permission_check
 
@@ -28,7 +29,7 @@ class BaseView(disnake.ui.View):
 
         if isinstance(error, commands.errors.CheckFailure):
             await interaction.response.send_message(
-                utils.fill_message("missing_perms", user=interaction.author.id),
+                Messages.missing_perms(user=interaction.author.id),
                 ephemeral=True
             )
             return
@@ -49,7 +50,7 @@ class BaseView(disnake.ui.View):
         for message in output:
             await channel_out.send(f"```\n{message}```")
         await channel_out.send(embed=embed)
-        self.log_error.send_output(traceback.format_exc(), channel_out)
+        await self.log_error.send_output(traceback.format_exc(), channel_out)
 
         # remove interactions because of error
         self.clear_items()

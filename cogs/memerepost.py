@@ -3,7 +3,8 @@ Cog for handling memes with X number of reactions to be reposted to a specific c
 """
 
 import asyncio
-from typing import List, Union
+from functools import cached_property
+from typing import List
 
 import disnake
 from disnake.ext import commands
@@ -11,18 +12,16 @@ from disnake.ext import commands
 import utils
 from buttons.embed import EmbedView
 from cogs.base import Base
-from config.app_config import config
 from config.messages import Messages
+from database.better_meme import BetterMemeDB
+from database.karma import KarmaDB, KarmaEmojiDB
+from database.meme_repost import MemeRepostDB
 from features.leaderboard import LeaderboardPageSource
 from features.reaction_context import ReactionContext
 from permissions import room_check
-from repository.better_meme import BetterMemeRepository
-from repository.database.better_meme import BetterMeme
-from repository.karma_repo import KarmaRepository
-from repository.meme_repost_repo import MemeRepostRepo
 
 
-def _leaderboard_formatter(entry: BetterMeme, **kwargs):
+def _leaderboard_formatter(entry: BetterMemeDB, **kwargs):
     return Messages.base_leaderboard_format_str.format_map(
         kwargs) + f" **{entry.posts}** posts **{entry.total_karma}** pts"
 
@@ -32,31 +31,32 @@ class MemeRepost(Base, commands.Cog):
         super().__init__()
         self.bot: commands.Bot = bot
 
-        self.karma_repo = KarmaRepository()
-        self.repost_repo = MemeRepostRepo()
-        self.better_repo = BetterMemeRepository()
-        self.repost_channel: Union[disnake.TextChannel, None] = None
+        self.better_db = BetterMemeDB()
         self.check = room_check.RoomCheck(bot)
 
         self.repost_lock = asyncio.Lock()
 
+    @cached_property
+    def repost_channel(self):
+        return self.bot.get_channel(self.config.meme_repost_room)
+
     async def handle_reaction(self, ctx: ReactionContext):
-        if ctx.channel.id == config.meme_room:
-            if self.repost_repo.find_repost_by_original_message_id(ctx.message.id) is not None:
+        if ctx.channel.id == self.config.meme_room:
+            if MemeRepostDB.find_repost_by_original_message_id(ctx.message.id) is not None:
                 # Message was reposted before
                 return
 
             all_reactions: List[disnake.Reaction] = ctx.message.reactions
             for reac in all_reactions:
-                if reac.count >= config.repost_threshold:
+                if reac.count >= self.config.repost_threshold:
                     emoji_key = str(reac.emoji.id) if type(reac.emoji) != str else reac.emoji
-                    emoji_val = self.karma_repo.emoji_value(emoji_key)
+                    emoji_val = KarmaEmojiDB.emoji_value(emoji_key)
 
                     if int(emoji_val) >= 1:
                         await self.__repost_message(ctx, all_reactions)
                         return
-        elif ctx.channel.id == config.meme_repost_room:
-            repost = self.repost_repo.find_repost_by_repost_message_id(ctx.message.id)
+        elif ctx.channel.id == self.config.meme_repost_room:
+            repost = MemeRepostDB.find_repost_by_repost_message_id(ctx.message.id)
 
             if repost is not None:
                 if ctx.member.id == int(repost.author_id):
@@ -65,13 +65,10 @@ class MemeRepost(Base, commands.Cog):
                 original_post_user = ctx.guild.get_member(int(repost.author_id))
 
                 if original_post_user:
-                    emoji_key = str(ctx.emoji.id) if type(ctx.emoji) != str else ctx.emoji
-                    emoji_val = self.karma_repo.emoji_value(emoji_key)
-                    self.better_repo.update_post_karma(original_post_user.id, emoji_val)
-                    if isinstance(ctx.emoji, str):
-                        self.karma_repo.karma_emoji(original_post_user.id, ctx.member.id, ctx.emoji)
-                    else:
-                        self.karma_repo.karma_emoji(original_post_user.id, ctx.member.id, ctx.emoji.id)
+                    emoji_key = utils.str_emoji_id(ctx.emoji)
+                    emoji_val = KarmaEmojiDB.emoji_value(emoji_key)
+                    BetterMemeDB.update_post_karma(original_post_user.id, emoji_val)
+                    KarmaDB.karma_emoji(original_post_user.id, ctx.member.id, emoji_key)
 
     @commands.Cog.listener()
     async def on_raw_reaction_remove(self, payload):
@@ -79,10 +76,10 @@ class MemeRepost(Base, commands.Cog):
         if ctx is None:
             return
 
-        if ctx.channel.id != config.meme_repost_room:
+        if ctx.channel.id != self.config.meme_repost_room:
             return
 
-        repost = self.repost_repo.find_repost_by_repost_message_id(ctx.message.id)
+        repost = MemeRepostDB.find_repost_by_repost_message_id(ctx.message.id)
         if repost is not None:
 
             if ctx.member.id == int(repost.author_id):
@@ -91,25 +88,18 @@ class MemeRepost(Base, commands.Cog):
             original_post_user = ctx.guild.get_member(int(repost.author_id))
 
             if original_post_user:
-                emoji_key = str(ctx.emoji.id) if type(ctx.emoji) != str else ctx.emoji
-                emoji_val = self.karma_repo.emoji_value(emoji_key)
-                self.better_repo.update_post_karma(original_post_user.id, -emoji_val)
-                if isinstance(ctx.emoji, str):
-                    self.karma_repo.karma_emoji_remove(original_post_user.id, ctx.member.id, ctx.emoji)
-                else:
-                    self.karma_repo.karma_emoji_remove(original_post_user.id, ctx.member.id, ctx.emoji.id)
+                emoji_key = utils.str_emoji_id(ctx.emoji)
+                emoji_val = KarmaEmojiDB.emoji_value(emoji_key)
+                BetterMemeDB.update_post_karma(original_post_user.id, -emoji_val)
+                KarmaDB.karma_emoji_remove(original_post_user.id, ctx.member.id, emoji_key)
 
     async def __repost_message(self, ctx: ReactionContext,
                                reactions: List[disnake.Reaction]):
-        if self.repost_channel is None and config.meme_repost_room != 0:
-            self.repost_channel = await self.bot.fetch_channel(config.meme_repost_room)
-
         # Invalid ID
         if self.repost_channel is None:
             return
-
         async with self.repost_lock:
-            if self.repost_repo.find_repost_by_original_message_id(ctx.message.id) is not None:
+            if MemeRepostDB.find_repost_by_original_message_id(ctx.message.id) is not None:
                 return
 
             # Generate string with all reactions on post at the time
@@ -132,9 +122,8 @@ class MemeRepost(Base, commands.Cog):
             embed.timestamp = ctx.message.created_at
 
             # Create link to original post
-            link = utils.fill_message("meme_repost_link",
-                                      original_message_url=ctx.message.jump_url,
-                                      original_channel=config.meme_room)
+            link = Messages.meme_repost_link(original_message_url=ctx.message.jump_url,
+                                             original_channel=self.config.meme_room)
             embed.add_field(name="Link", value=link, inline=False)
 
             # Get all attachments of original post
@@ -144,7 +133,13 @@ class MemeRepost(Base, commands.Cog):
                 content_type = attachment.content_type
                 if content_type is not None and content_type.split("/")[0] == "image" and main_image is None:
                     # Set main image if its image and main image is not set
-                    main_image = await attachment.to_file()
+                    if attachment.is_spoiler():
+                        # if image has spoiler it must be in other_attachments
+                        # because embeds don't support images with spoiler
+                        attachment_file = await attachment.to_file()
+                        other_attachments.append(attachment_file)
+                    else:
+                        main_image = await attachment.to_file()
                 else:
                     # Other attachments convert to file and append to list of attachments
                     attachment_file = await attachment.to_file()
@@ -157,7 +152,7 @@ class MemeRepost(Base, commands.Cog):
                 for content_split in content_splits:
                     if content_split.startswith("https://"):
                         # Its attachement URL
-                        for extension in config.meme_repost_image_extensions:
+                        for extension in self.config.meme_repost_image_extensions:
                             # Check for extension in URL
                             if f".{extension}" in content_split:
                                 if main_image is None:
@@ -199,22 +194,23 @@ class MemeRepost(Base, commands.Cog):
                     secondary_message = await self.repost_channel.send(urls, files=files)
                     secondary_message_id = secondary_message.id
 
-            self.repost_repo.create_repost(ctx.message.id,
-                                           repost_message_id,
-                                           ctx.message.author.id,
-                                           secondary_message_id)
+            MemeRepostDB.create_repost(
+                ctx.message.id,
+                repost_message_id,
+                ctx.message.author.id,
+                secondary_message_id
+            )
 
             total_karma = 0
 
             for reac in reactions:
-                emoji_key = str(reac.emoji.id) if type(reac.emoji) != str else reac.emoji
-                emoji_val = self.karma_repo.emoji_value(emoji_key)
+                emoji_key = utils.str_emoji_id(reac.emoji)
+                emoji_val = KarmaEmojiDB.emoji_value(emoji_key)
                 total_karma += reac.count * emoji_val
 
-            self.better_repo.add_post_to_repo(ctx.message.author.id,
-                                              total_karma)
+            BetterMemeDB.add_post_to_repo(ctx.message.author.id, total_karma)
 
-    @commands.slash_command(name="better-meme", guild_ids=[config.guild_id])
+    @commands.slash_command(name="better-meme", guild_ids=[Base.config.guild_id])
     async def _better_meme(self, inter):
         pass
 
@@ -231,7 +227,7 @@ class MemeRepost(Base, commands.Cog):
         page_source = LeaderboardPageSource(
             bot=self.bot,
             author=inter.author,
-            query=self.better_repo.get_leaderboard(order_by),
+            query=BetterMemeDB.get_leaderboard(order_by),
             row_formatter=_leaderboard_formatter,
             base_embed=embed,
             title='BETTER MEMES LEADERBOARD',

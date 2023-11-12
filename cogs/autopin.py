@@ -11,22 +11,19 @@ from disnake.ext import commands
 import utils
 from cogs.base import Base
 from config import cooldowns
-from config.app_config import config
 from config.messages import Messages
+from database.pin_map import PinMapDB
 from features.autopin import AutopinFeatures, pin_channel_type
 from permissions import permission_check, room_check
-from repository import pin_repo
-from repository.database.pin_map import PinMap
 
 
 class AutoPin(Base, commands.Cog):
     def __init__(self, bot):
         super().__init__()
         self.warning_time = datetime.datetime.utcnow() - datetime.timedelta(
-            minutes=config.autopin_warning_cooldown
+            minutes=self.config.autopin_warning_cooldown
         )
         self.bot = bot
-        self.repo = pin_repo.PinRepository()
         self.check = room_check.RoomCheck(bot)
         self.pin_features = AutopinFeatures(bot)
 
@@ -68,7 +65,7 @@ class AutoPin(Base, commands.Cog):
                 await inter.send(Messages.autopin_max_pins_error)
                 return
 
-            self.repo.add_or_update_channel(str(message.channel.id), str(message.id))
+            PinMapDB.add_or_update_channel(str(message.channel.id), str(message.id))
 
             if not message.pinned:
                 await message.pin()
@@ -87,16 +84,16 @@ class AutoPin(Base, commands.Cog):
         if channel is None:
             channel = inter.channel
 
-        if self.repo.find_channel_by_id(str(channel.id)) is None:
-            await inter.send(utils.fill_message("autopin_remove_not_exists", channel_name=channel.mention))
+        if PinMapDB.find_channel_by_id(str(channel.id)) is None:
+            await inter.send(Messages.autopin_remove_not_exists(channel_name=channel.mention))
             return
 
-        self.repo.remove_channel(str(channel.id))
+        PinMapDB.remove_channel(str(channel.id))
         await inter.send(Messages.autopin_remove_done)
 
     @pin_mod.sub_command(name="list", description=Messages.autopin_list_brief)
     async def get_list(self, inter: disnake.ApplicationCommandInteraction):
-        mappings: List[PinMap] = self.repo.get_mappings()
+        mappings: List[PinMapDB] = PinMapDB.get_mappings()
 
         if not mappings:
             await inter.send(Messages.autopin_no_messages)
@@ -107,19 +104,15 @@ class AutoPin(Base, commands.Cog):
             try:
                 channel = await utils.get_or_fetch_channel(self.bot, int(item.channel_id))
             except disnake.NotFound:
-                lines.append(utils.fill_message("autopin_list_unknown_channel", channel_id=item.channel_id))
-                self.repo.remove_channel(str(item.channel_id))
+                lines.append(Messages.autopin_list_unknown_channel(channel_id=item.channel_id))
+                PinMapDB.remove_channel(str(item.channel_id))
                 continue
 
             try:
                 message: disnake.Message = await channel.fetch_message(int(item.message_id))
-                msg: str = utils.fill_message(
-                    "autopin_list_item",
-                    channel=channel.mention,
-                    url=message.jump_url
-                )
+                msg: str = Messages.autopin_list_item(channel=channel.mention, url=message.jump_url)
             except disnake.NotFound:
-                msg: str = utils.fill_message("autopin_list_unknown_message", channel=channel.mention)
+                msg: str = Messages.autopin_list_unknown_message(channel=channel.mention)
             finally:
                 lines.append(msg)
 
@@ -157,14 +150,14 @@ class AutoPin(Base, commands.Cog):
 
         channel_mention = channel.mention if hasattr(channel, "mention") else "**DM s botem**"
         await inter.send(file=file)
-        await inter.edit_original_response(Messages.autopin_get_all_done.format(channel_name=channel_mention))
+        await inter.edit_original_response(Messages.autopin_get_all_done(channel_name=channel_mention))
 
     @commands.Cog.listener()
     async def on_guild_channel_pins_update(self, channel: disnake.TextChannel, _):
         """
         repin priority pin if new pin is added
         """
-        pin_map: PinMap = self.repo.find_channel_by_id(str(channel.id))
+        pin_map: PinMapDB = PinMapDB.find_channel_by_id(str(channel.id))
 
         # This channel is not used to check priority pins.
         if pin_map is None:
@@ -174,7 +167,7 @@ class AutoPin(Base, commands.Cog):
 
         # Mapped pin was removed. Remove from map.
         if not int(pin_map.message_id) in pins:
-            self.repo.remove_channel(str(channel.id))
+            PinMapDB.remove_channel(str(channel.id))
 
         # check priority pin is first
         elif pins[0] != int(pin_map.message_id):
@@ -182,7 +175,7 @@ class AutoPin(Base, commands.Cog):
 
             # Message doesn't exist. Remove from map.
             if message is None:
-                self.repo.remove_channel(str(channel.id))
+                PinMapDB.remove_channel(str(channel.id))
                 return
 
             await message.unpin()
@@ -193,12 +186,12 @@ class AutoPin(Base, commands.Cog):
         """
         if the priority pin is deleted remove it from the map
         """
-        pin_map: PinMap = self.repo.find_channel_by_id(str(payload.channel_id))
+        pin_map: PinMapDB = PinMapDB.find_channel_by_id(str(payload.channel_id))
 
         if pin_map is None or pin_map.message_id != str(payload.message_id):
             return
 
-        self.repo.remove_channel(str(payload.channel_id))
+        PinMapDB.remove_channel(str(payload.channel_id))
 
     async def handle_reaction(self, ctx):
         """
@@ -206,22 +199,23 @@ class AutoPin(Base, commands.Cog):
         """
         message = ctx.message
         channel = ctx.channel
-        if ctx.emoji == "📌" and ctx.member.id in config.autopin_banned_users:
+        if ctx.emoji == "📌" and ctx.member.id in self.config.autopin_banned_users:
             await message.remove_reaction("📌", ctx.member)
             return
         for reaction in message.reactions:
             if (
                 reaction.emoji == "📌"
-                and reaction.count >= config.autopin_count
+                and reaction.count >= self.config.autopin_count
                 and not message.pinned
                 and not message.is_system()
-                and message.channel.id not in config.autopin_banned_channels
+                and message.channel.id not in self.config.autopin_banned_channels
             ):
                 # prevent spamming max_pins_error message in channel
                 pin_count = await channel.pins()
                 if len(pin_count) == 50:
                     now = datetime.datetime.utcnow()
-                    if self.warning_time + datetime.timedelta(minutes=config.autopin_warning_cooldown) < now:
+                    cooldown = datetime.timedelta(minutes=self.config.autopin_warning_cooldown)
+                    if self.warning_time + cooldown < now:
                         await channel.send(
                             f"{ctx.member.mention} {Messages.autopin_max_pins_error}\n{ctx.message.jump_url}"
                         )
@@ -247,7 +241,7 @@ class AutoPin(Base, commands.Cog):
             inline=False
         )
         embed.timestamp = datetime.datetime.now(tz=datetime.timezone.utc)
-        channel = self.bot.get_channel(config.log_channel)
+        channel = self.bot.get_channel(self.config.log_channel)
         await channel.send(embed=embed)
 
 

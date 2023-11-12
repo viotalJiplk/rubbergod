@@ -12,12 +12,11 @@ from disnake.ext import commands, tasks
 import utils
 from cogs.base import Base
 from config import cooldowns
-from config.app_config import config
 from config.messages import Messages
+from database import session
+from database.verification import PermitDB, ValidPersonDB
 from features.list_message_sender import send_list_of_messages
 from permissions import permission_check
-from repository.database import session
-from repository.database.verification import Permit, Valid_person
 
 
 def running_for(time):
@@ -49,7 +48,7 @@ def filter_year(resources):
     # get unique logins and people objects from db
     logins = set(login for res_data in resources.values() for login in res_data.keys())
     people = {
-        login: session.query(Valid_person).filter(Valid_person.login == login).one_or_none()
+        login: session.query(ValidPersonDB).filter(ValidPersonDB.login == login).one_or_none()
         for login in logins
     }
 
@@ -178,7 +177,7 @@ _inflected_resources = {
 def insult_login(parsed_items, system, res_type):
     output_array = []
     for login, array in parsed_items.items():
-        user = session.query(Permit).filter(Permit.login == login).one_or_none()
+        user = session.query(PermitDB).filter(PermitDB.login == login).one_or_none()
 
         if not user:
             msg = f"Na {system} leží {_inflected_resources[res_type][0]} " \
@@ -199,7 +198,7 @@ def insult_login(parsed_items, system, res_type):
 def insult_login_shm(parsed_files, system):
     output_array = []
     for login, data in parsed_files.items():
-        user = session.query(Permit).filter(Permit.login == login).one_or_none()
+        user = session.query(PermitDB).filter(PermitDB.login == login).one_or_none()
         array, login_not_in_name = data
 
         if not user:
@@ -241,12 +240,12 @@ class IOS(Base, commands.Cog):
 
     @cooldowns.default_cooldown
     @commands.check(permission_check.helper_plus)
-    @commands.slash_command(name="ios", description=Messages.ios_brief, guild_ids=[config.guild_id])
+    @commands.slash_command(name="ios", description=Messages.ios_brief, guild_ids=[Base.config.guild_id])
     async def ios(self, inter: disnake.ApplicationCommandInteraction):
         await inter.response.defer()
         await self.ios_task(inter)
 
-    @commands.slash_command(name="ios_task", guild_ids=[config.guild_id])
+    @commands.slash_command(name="ios_task", guild_ids=[Base.config.guild_id])
     async def _ios(self, inter):
         pass
 
@@ -277,10 +276,10 @@ class IOS(Base, commands.Cog):
         else:
             await inter.send(Messages.ios_task_stop_nothing_to_stop)
 
-    @tasks.loop(minutes=config.ios_looptime_minutes)
+    @tasks.loop(minutes=Base.config.ios_looptime_minutes)
     async def ios_task(self, inter: disnake.ApplicationCommandInteraction = None):
         # Respond to interaction if any, else print everything to #ios
-        channel = inter.channel if inter is not None else self.bot.get_channel(config.ios_channel_id)
+        channel = inter.channel if inter is not None else self.bot.get_channel(self.config.ios_channel_id)
         if inter is not None:
             await inter.edit_original_response(Messages.ios_howto_clean)
         else:

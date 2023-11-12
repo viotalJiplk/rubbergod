@@ -28,8 +28,8 @@ db_string = "postgresql://postgres:postgres@db:5432/postgres"
 [cogs]
 extensions = ['karma', 'meme', 'memerepost', 'random', 'verify', 'fitwide', 'autopin',
     'help', 'review', 'vote', 'week', 'roles', 'error', 'absolvent', 'gif', 'reactions',
-    'streamlinks', 'bookmark', 'subscriptions', 'latex', 'info', 'fun', 'moderation',
-    'timeout', 'forum']
+    'streamlinks', 'bookmark', 'latex', 'info', 'fun', 'moderation', 'message',
+    'timeout', 'forum', 'report', 'contestvote']
 
 [config]
 static = ['config_static', 'toml_dict', 'key', 'weather_token', 'db_string']
@@ -47,6 +47,12 @@ grillbot_leaderboard_size = 50
 minimum = 20
 minutes = 2
 
+[contest_vote]
+channel = 0
+weight_1 = 2
+weight_2 = 1.5
+weight_3 = 1
+
 [autopin]
 count = 20
 #                       skolni-info          server-info
@@ -61,6 +67,7 @@ vote_room = 461544375105749003
 bot_room = 461549842896781312
 mod_room = 505679727936143361
 submod_helper_room = 1023669101744357377
+report_channel = 1120635712950251551
 
 allowed_channels = [
         'bot_room',
@@ -79,6 +86,8 @@ image_extensions = ["png", "jpg", "jpeg", "gif"]
 
 [meme]
 uhoh_string = 'uh oh'
+upgraded_pocitani_thread_id = 1082751957288100042
+upgraded_pocitani_start_num = 1
 hug_emojis = ["<:peepoHug:600435649786544151>",
     "<:peepoHugger:602052621007585280>",
     "<:huggers:602823825880514561>", "(っ˘̩╭╮˘̩)っ", "(っ´▽｀)っ",
@@ -110,8 +119,10 @@ mit_id_rnd = [15220]
 [grillbot]
 #      Production,         Development
 ids = [902678773307174943, 599119578811072523]
+api_url = "https://grillbot.eu/api"
 api_supported_methods = ["Help", "AutoPin"]
 api_key = ""
+karma_sync_interval = 60 # Update interval in minutes for automatic sync karma.
 
 [weather]
 token = "678a5932f6dd92ac668b20e9f89c0318"
@@ -136,10 +147,6 @@ loading="<a:loading:814969399442014259>"
 ios_looptime_minutes=120
 ios_channel_id=534431057001316362
 
-[subscriptions]
-# list of channels users are allowed to subscribe to
-subscribable_channels = [0]
-
 [exams]
 page_size = 6
 paginator_duration = 60
@@ -149,7 +156,7 @@ subscribe_default_guild = true
 
 [icons]
 icon_roles = [0,1]
-role_prefix = "Ikona: "
+role_prefix = "ico-"
 ui_cooldown = 10.0
 [icons.rule.0]
 allow=[] # prevent anyone from self-assigning this role

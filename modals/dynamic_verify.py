@@ -2,14 +2,13 @@ from typing import List, Union
 
 import disnake
 
-import utils
 from config.messages import Messages
+from database.verification import DynamicVerifyDB
 from features.dynamic_verify import DynamicVerifyManager
-from repository.database.verification import DynamicVerifyRule
 
 
 class DynamicVerifyEditModal(disnake.ui.Modal):
-    def __init__(self, guild: disnake.Guild, rule: Union[DynamicVerifyRule, None] = None):
+    def __init__(self, guild: disnake.Guild, rule: Union[DynamicVerifyDB, None] = None):
         self.rule = rule
 
         selected_roles = rule.get_role_ids() if self.is_edit() else []
@@ -132,7 +131,7 @@ class DynamicVerifyEditModal(disnake.ui.Modal):
         if rule_id is None or enabled is None or roles is None:
             return  # Validation failed.
 
-        rule = self.rule if self.is_edit() else DynamicVerifyRule()
+        rule = self.rule if self.is_edit() else DynamicVerifyDB()
 
         rule.id = rule_id
         rule.name = name
@@ -140,7 +139,7 @@ class DynamicVerifyEditModal(disnake.ui.Modal):
         rule.mod_check = await self.get_bool_state(inter, "mod_check")
         rule.set_role_ids([role.id for role in roles])
 
-        manager.verify_repo.update_rule(rule)
+        rule.update_rule()
         await inter.response.send_message(
             Messages.dynamic_verify_edit_success if self.is_edit() else Messages.dynamic_verify_create_success
         )
@@ -185,7 +184,7 @@ class DynamicVerifyEditModal(disnake.ui.Modal):
                 role = inter.guild.get_role(int(item))
                 if role is None:
                     await inter.response.send_message(
-                        utils.fill_message("dynamic_verify_role_not_exists", role=item)
+                        Messages.dynamic_verify_role_not_exists(role=item)
                     )
                     return None
                 roles.append(role)
@@ -194,7 +193,7 @@ class DynamicVerifyEditModal(disnake.ui.Modal):
                 role = disnake.utils.get(inter.guild.roles, name=item)
                 if role is None:
                     await inter.response.send_message(
-                        utils.fill_message("dynamic_verify_role_not_exists", role=item)
+                        Messages.dynamic_verify_role_not_exists(role=item)
                     )
                     return None
                 roles.append(role)

@@ -1,21 +1,55 @@
 from config.app_config import config
+from features.callable_string import Formatable
 
 
-class Messages:
+class Messages(metaclass=Formatable):
     # GENERAL MESSAGES
     prefix = config.default_prefix
 
     server_warning = "Tohle funguje jen na VUT FIT serveru."
 
     help_title = "Nápověda"
-    help_description = "Kompletní seznam lze také najít ve veřejné administraci bota (https://public.grillbot.cloud/)"
+    help_description = "Kompletní seznam lze také najít ve veřejné administraci bota (https://public.grillbot.eu/)"
 
     karma_get_missing = "Toaster pls, měl jsi bordel v DB. Musel jsem za tebe uklidit."
 
     on_ready_message = "<:peepowave:693070888546861096>"
-    cooldown = "Příliš rychle, zkus to znovu za {:.3}s"
+    cooldown = "Příliš rychle, zkus to znovu za {time:.3}s"
     embed_not_author = "Hraj si na svém písečku s tebou zavolanými příkazy. <:pepeGun:826943455032901643>"
     base_leaderboard_format_str = "_{position}._ - **{member_name}**:"
+
+    # FITWIDE
+    increment_roles_brief = "Aktualizuje role na serveru podle ročníku. Aktualizace školních roomek."
+    increment_roles_start = "Incrementing roles..."
+    increment_roles_names = "1/3 - Role úspěšně přejmenovány a 0bit a 0mit vytvořen"
+    increment_roles_room_names = "2/3 - Kanály úspěšně přejmenovány a 0bit a 0mit general vytvořen"
+    increment_roles_success = "3/3 - Holy fuck, všechno se povedlo, tak zase za rok <:Cauec:602052606210211850>"
+    fitwide_role_check_brief = "Zkontroluje ročníkové role uživatelům"
+    fitwide_role_check_start = "Kontrola uživatelů ..."
+    fitwide_role_check_user_not_found = "Ve verified databázi jsem nenašel: {user} ({id})"
+    fitwide_role_check_user_duplicate = "{user} ({id}) je v permit databázi víckrát?"
+    fitwide_role_check_wrong_status = "Status nesedí u: {user} ({id})"
+    fitwide_brief = "Příkazy na manipulaci verify studentů"
+    fitwide_update_db_brief = "Aktualizuje databázy s loginy"
+    fitwide_update_db_start = "Aktualizuji databázy..."
+    fitwide_new_logins = "Našel jsem {new_logins} nových loginů."
+    fitwide_update_db_done = "Aktualizace databáze proběhla úspěšně."
+    fitwide_db_debug = "Debug: Našel jsem {cnt_new} nových prvaků."
+    fitwide_pull_db_brief = "Stáhne databázy uživatelů na merlinovi"
+    fitwide_get_db_error = "Při stahování databáze došlo k chybě."
+    fitwide_get_db_timeout = "Timeout při stahování databáze."
+    fitwide_get_db_success = "Stažení databáze proběhlo úspěšně."
+    fitwide_get_login_brief = "Získá xlogin uživatele"
+    fitwide_login_not_found = "Uživatel není v databázi."
+    fitwide_get_user_brief = "Získá discord uživatele"
+    fitwide_get_user_not_found = "Uživatel není v databázi možných loginů."
+    fitwide_get_user_format = "Login: `{p.login}`\nJméno: `{p.name}`\n" "Ročník: `{p.year}`\n"
+    fitwide_invalid_login = "To není validní login."
+    fitwide_action_success = "Příkaz proběhl úspěšně."
+    fitwide_reset_login_brief = "Odstraní uživatele z verify databáze"
+    fitwide_link_login_user_brief = "Propojí login s uživatelem"
+    fitwide_not_in_modroom = "Nothing to see here comrade. <:KKomrade:484470873001164817>"
+    fitwide_login_already_exists = "Uživatel již existuje v databázi."
 
     # ERROR
     moved_command = "Tento příkaz již není v textové formě podporován. Příkaz byl nahrazen příkazem </{name}:{id}>"
@@ -23,7 +57,7 @@ class Messages:
     command_timed_out = "Příkaz nereagoval a byl nečekaně ukončen."
     command_invoke_error = "Došlo k nečekané chybě, už na tom pracujeme <:notLikeRubbergod:1112395455142314044>"
     user_input_error = "Chyba ve vstupu, jestli vstup obsahuje `\"`, nahraď je za `'`"
-    spamming = "{user} Nespamuj tolik <:sadcat:576171980118687754>, příkaz můžeš použít až za {time:.2f}s."
+    spamming = "{user} Nespamuj tolik <:sadcat:576171980118687754>, příkaz můžeš použít až za {time}."
     member_not_found = "{member} Nikoho takového jsem na serveru nenašel."
     user_not_found = "{user} Nikoho takového jsem nenašel."
     help_command_not_found = "Žádný příkaz jako `{command}` neexistuje."
@@ -53,6 +87,7 @@ class Messages:
     hug_hugboard_brief = "Celková tabulka statistiky obejmutí"
     hug_huggersboard_brief = "Vypíše nejčastější objímače"
     hug_mosthugged_brief = "Vypíše nejvíce objímané lidi"
+    upgraded_pocitani_caught_deleting = "Podvádět mazáním zpráv je zakázáno. Začínáme znovu: "
 
     # IOS
     ios_brief = "Připomene všem prasatům, že si mají jít po sobě uklidit"
@@ -88,7 +123,7 @@ class Messages:
 
     karma_invalid_command = "Neznámý karma příkaz."
     karma_vote_message_hack = "Hlasování o karma ohodnocení emotu"
-    karma_vote_message = f"{karma_vote_message_hack} {{emote}}"
+    karma_vote_message = f"{karma_vote_message_hack} {{emote}}\n"
     karma_vote_info = "Hlasování skončí za **{delay}** " \
                       "minut a minimální počet hlasů je " \
                       "**{minimum}**."
@@ -108,12 +143,12 @@ class Messages:
     karma_get = "Hodnota {emote} je {value}."
     karma_getall_response = "Ohodnocené emoji:"
     karma_get_emote_not_voted = "{emote} není ohodnocen."
-    karma_give_success = "Uživateli {user} bylo úspěšně přidáno **{karma} karmy**."
-    karma_give_negative_success = "Uživateli {user} bylo úspěšně odebráno **{karma} karmy**."
+    karma_give_success = "Uživateli {user_list} bylo úspěšně přidáno **{karma} karmy**."
+    karma_give_negative_success = "Uživateli {user_list} bylo úspěšně odebráno **{karma} karmy**."
     karma_message_format = "Musíš zadat url zprávy"
     karma_leaderboard_offset_error = "{user} Špatný offset, zadej kladné číslo"
     karma_web_title = "Celý leaderboard"
-    karma_web = "https://karma.grillbot.cloud/"
+    karma_web = "https://karma.grillbot.eu/"
     karma_transfer_same_user = "Nelze převést karmu na stejného uživatele."
     karma_transer_user_no_karma = "{user} nemá žádnou karmu."
     karma_transfer_complete = "Karma byla úspěšně převedena z `{from_user}` na `{to_user}`:\n" \
@@ -144,6 +179,29 @@ class Messages:
     role_create_done = "Migrace oprávnění na roli **{role}** dokončena. Počet oprávnění: {perms}"
     role_migration_allert = "Přidání/Odebrání **{channel}** bude trvat déle než je obvyklé (až 30 min)." \
                             "Prosím o strpení. Opakované klikání na reakce nemá vliv na dobu zpracování přístupu."
+
+    remove_exclusive_roles = "Odstraní konflikty rolí, kdy má uživatel více exkluzivních rolí."
+    remove_exclusive_roles_start = "Probíhá odstraňování konfliktů rolí {role1} a {role2}"
+    role_no_exlusives = "Nebyly nalezeny žádné konflikty rolí"
+    remove_exclusive_roles_done = "Úspěšně odstraněny konflikty rolí"
+    role_to_remove = "Role, která se má odstranit"
+
+    channel_copy_start = "Probíhá kopírování kanálu"
+    channel_copy_done = "Práva byla zkopírována."
+    channel_clone_start = "Probíhá klonování kanálu"
+    channel_clone_done = "Kanál <#{id}> byl vytvořen."
+    channel_create_start = "Probíhá vytváření kanálu"
+    channel_create_done = "Vytvoření kanálu bylo úspěšné, kanál {channel} vytvořen s přístupem pro roli **{role}**.\n • Počet overwrites: **{perms}**"
+    channel_rate = "Po kolika částech aktualizovat progress bar."
+    channel_get_overwrites_brief = "Vypíše počet přístupových práv pro všechny mistnosti"
+    channel_get_overwrites_start = "Probíhá získávání přístupových práv"
+    channel_get_overwrites_done = "Získávání přístupových práv bylo úspěšné"
+    channel_role_to_overwrites_brief = "Vytvoří roli z přístupových práv"
+    channel_role_to_overwrites_start = "Probíhá převádění role na přístupová práva"
+    channel_role_to_overwrites_done = "Role úspěšně převedena na přístupová práva"
+    channel_overwrites_to_role_brief = "Vytvoří overwrites na místnost z role"
+    channel_overwrites_to_role_start = "Probíhá převádění přístupových práv na roli"
+    channel_overwrites_to_role_done = "Přístupová práva byla úspěšně převedena na roli"
 
     group_add = "Přidá skupinu"
     group_get = "Vypíše informace o skupině"
@@ -181,13 +239,13 @@ class Messages:
     verify_verify_manual = "Čauec {user}, nechám {admin}, aby to udělal manuálně, " \
                            "jsi shady (Year: {year})"
     verify_verify_success = "{user} Gratuluji, byl jsi verifikován!"
-    verify_post_verify_info = "Podívej se do kanálů:\n" \
-                              "<#591384273051975683> Pro přidání rolí\n" \
-                              "<#489461089432633346> Pro pravidla a další info"
+    verify_post_verify_info = "Role si přidáš v Channels & Roles " \
+                              "(Jak na to 👉 https://discord.com/channels/461541385204400138/489461089432633346/635184378065977354)\n" \
+                              "Dále se mrkni do <#489461089432633346> pro pravidla a další info"
     server_link = "https://discord.com/channels/461541385204400138/"
     verify_verify_success_mail = "Gratuluji, byl jsi verifikován!"
-    verify_post_verify_info_mail = "Podivej se do kanalu " \
-                              f"#server-info - Pro pravidla a další info ({server_link}489461089432633346)"
+    verify_post_verify_info_mail = "Podívej se do kanálu " \
+                              f"#server-info pro pravidla a další info ({server_link}489461089432633346)"
     verify_mail_content = "Obdržel/a jsi kód pro ověření se k přístup na server VUT FIT.\n" \
                           "Po stisknutí na tlačítko \"Zadat kód\" vyplň ověřovací kód přesně tak jak je uveden níže.\n\n" \
                           "Ověřovací kód: {code}"
@@ -201,11 +259,13 @@ class Messages:
     verify_subject = "FIT Discord verifikace"
     dynamic_verify_requested = "Byla zaslána žádost o verifikaci. Vyčkej prosím než ji někdo z oprávněných osob schválí."
     dynamic_verify_declined = "Tvá žádost o verifikaci byla zamítnuta."
-    dynamic_verify_create = "Vytvoření pravidla pro verifikaci"
-    dynamic_verify_edit = "Vytvoření pravidla pro verifikaci"
-    dynamic_verify_edit_rule_id = "Pravidlo k editaci"
+    dynamic_verify_create_brief = "Vytvoření pravidla pro verifikaci"
+    dynamic_verify_edit_brief = "Vytvoření pravidla pro verifikaci"
+    dynamic_verify_rule_id = "Pravidlo k editaci"
     dynamic_verify_edit_success = "Pravidlo bylo úspěšně upraveno."
     dynamic_verify_create_success = "Pravidlo bylo úspěšně vytvořeno."
+    dynamic_verify_remove_brief = "Odstranění pravidla pro verifikaci"
+    dynamic_verify_remove_success = "Pravidlo bylo úspěšně odstraněno."
     dynamic_verify_rule_missing = "Nebylo zadáno platné ID pravidla."
     dynamic_verify_rule_exists = "ID s tímto pravidlem již existuje."
     dynamic_verify_invalid_state = "Nepovolený stav. Lze zadat pouze True/False"
@@ -213,6 +273,7 @@ class Messages:
     dynamic_verify_no_roles = "Nebyla nalezena žádná role."
     dynamic_verify_missing_rule = "Toto pravidlo (`{rule_id}`) neexistuje."
 
+    # VOTE
     vote_brief = "Zahájí hlasování, ve kterém je možné zvolit více možností"
     vote_one_of_brief = "Zahájí hlasování, ve kterém je možné zvolit pouze jednu možnost"
     vote_format = f"`{prefix}[single]vote [datum a čas konce]\n[otázka]\n[emoji] " \
@@ -236,15 +297,21 @@ class Messages:
     vote_result_multiple = "V hlasování „{question}“ vyhrály možnosti {winning_emojis} s {votes} hlasy."
     vote_result_none = "V hlasování „{question}“ nikdo nehlasoval. <:sadcat:576171980118687754>"
 
+    # CONTESTVOTE
+    contest_vote_calculate_message_brief = "Spočítá počet hlasů a jejich celkovou váhu pro daný příspěvek"
+    contest_vote_winners_brief = "Zobrazí prvních 5 vítězných příspěvků"
+    contest_vote_no_reactions = "Tato zpráva nemá žádné reakce"
+    contest_vote_no_votes = "Na tuto zprávu nebyly přidány žádné hlasy"
+
     # REVIEW
     review_add_brief = "Přidá recenzi na předmět. Pokud jsi již recenzi na předmět napsal, bude nahrazena novou."
     review_get_brief = "Vypíše recenze na vybraný předmět"
     review_remove_brief = "Odstraní hodnocení"
     review_list_brief = "Vypíše předměty, které si již ohodnotil"
     review_id_brief = "ID recenze, pouze pro administrátory"
+    review_grade_brief = "Známku, kterou by jsi dal předmětu od A-F (za organizaci, splnění očekávání, kvalitu výuky ...)"
 
     review_wrong_subject = "Nesprávná zkratka předmětu."
-    review_tier = "Tier je z rozsahu 0-4, kde 0 je nejlepší."
     review_added = "Hodnocení předmětu bylo přidáno."
     reviews_reaction_help = "Pokud byla recenze užitečná dejte 👍, jinak 👎.\n" \
                             "Pro odstranění hlasu je možné použit 🛑.\n" \
@@ -257,6 +324,17 @@ class Messages:
     review_add_denied = "{user}, na přidání hodnocení předmětu nemáš právo."
     review_not_on_server = "{user}, na použití tohoto příkazu musíš být na FITwide serveru."
 
+    # review embed
+    review_embed_description = "{name}\n**Průměrná známka od studenta:** {grade}"
+    review_embed_no_reviews = "*Zatím nic*"
+    review_text_label = "Text recenze"
+    review_text_page_label = "Stránka textu"
+    review_author_label = "Autor"
+    review_grade_label = "Kvalita předmětu"
+    review_date_label = "Datum"
+    review_other_reviews_label = "Další hodnocení"
+    review_authored_list_label = "Ohodnotil jsi:"
+
     # review modal
     review_modal_title = "Přidat novou recenzi"
     review_subject_label = "Vyberte předmět"
@@ -268,10 +346,9 @@ class Messages:
     review_tier_2_desc = "Průměrný předmět"
     review_tier_3_desc = "Nic moc"
     review_tier_4_desc = "Nejhorší, celé zle"
-    review_text_label = "Text recenze"
 
     subject_update_biref = "Automaticky vyhledá a přidá předměty do reviews i subject databáze"
-    subject_format = f"{prefix}subject [update]"
+    subject_update_overwrite_brief = "Přepíše všechny informace o předmětech. Využít pouze v kombinaci s další aktualizací bez přepisu."
     subject_update_error = "Aktualizace se nezdařila pro <{url}>\n"
     subject_update_success = "Předměty byly aktualizovány."
     shortcut_brief = "Vrací stručné informace o předmětu"
@@ -302,11 +379,18 @@ class Messages:
     absolvent_id_from_help = "Zadej svoje ID práce."
     absolvent_brief = "Příkaz pro ověření absolvování studia na FIT VUT"
     absolvent_help_brief = "Vypíše help k příkazu /diplom"
+    absolvent_not_in_db = "Tvůj login nebyl nalezen v databázi ověřených uživatelů. Použij příkaz `/verify` pro ověření (je zapotřebí školní email)."
+    absolvent_not_verified = "Pro zavolání tohoto příkazu je potřeba se ověřit pomocí příkazu `/verify`."
     absolvent_help = f"{absolvent_brief} - zadejte CASE-SENSITIVE údaje ve formátu:\n" \
         "/diplom <Titul.> <Jméno> <Příjmení> <Číslo diplomu> <ID kvalifikační práce z URL na webu knihovny VUT <https://dspace.vutbr.cz/handle/11012/19121> >\n" \
         "např: Bc. Josef Novák 123456/2019 99999\n" \
         "(při <https://dspace.vutbr.cz/handle/11012/99999>)\n" \
         "Údaje slouží k jednorázovému ověření a nejsou nikam ukládány."
+    absolvent_degree_param = "Dosažený titul - Bc./Ing."
+    absolvent_name_param = "Křestní jméno např.: Josef"
+    absolvent_surname_param = "Příjmení např.: Novák"
+    absolvent_diploma_param = "Číslo diplomu např.: 123456/2019"
+    absolvent_thesis_id_param = "ID kvalifikační práce z URL na webu knihovny VUT(dspace.vutbr.cz) např.: 99999"
 
     # INFO
     urban_brief = "Vyhledávaní výrazu v urban slovníku"
@@ -314,6 +398,13 @@ class Messages:
     urban_not_found = "Pro daný výraz neexistuje záznam <:sadcat:576171980118687754>"
 
     weather_brief = "Vypíše informace o počasí ve zvoleném městě. Výchozí město je Brno."
+    credit_limit_brief = "Vypíše, jak to funguje s ročním kreditovým stropem."
+    credit_limit_info = """```cs
+if ("pokazil jsem volitelný" or "Pokazil jsem aspoň 2 povinné")     \n  return 65
+if ("Pokazil jsem 1 povinný" or "Mám průměr 2.0 nebo více než 2.0") \n  return 70
+if ("Mám průměr pod 1.5")                                           \n  return 80
+if ("Mám průměr pod 2.0")                                           \n  return 75
+```"""
 
     # AUTOPIN
     autopin_max_pins_error = "Zprávu nelze připnout - byl dosažen maximální počet připnutých zpráv."
@@ -341,6 +432,8 @@ class Messages:
     uptime_brief = "Vypíše čas spuštění a čas uplynulý od spuštění"
     uptime_title = "Uptime"
     upsince_title = "Up since"
+    uptime_latency = "Latency"
+    longest_streak = "Longest streak without error"
 
     cogs_brief = "Vypíše seznam všech cogs a jejich stav"
     cog_is_loaded = "Toto rozšíření `{cog}` je již načtené."
@@ -365,15 +458,6 @@ class Messages:
     config_backup_created = "Config backup created."
     config_list_invalid_regex = "Chybný regex\n`{regex_err}`"
     config_synced = "Config successfully synchronized."
-
-    # ROLES
-    channel_copy_start = "Probíhá kopírování kanálu"
-    channel_copy_done = "Práva byla zkopírována."
-    channel_clone_start = "Probíhá klonování kanálu"
-    channel_clone_done = "Kanál <#{id}> byl vytvořen."
-    channel_create_start = "Probíhá vytváření kanálu"
-    channel_create_done = "Vytvoření kanálu bylo úspěšné, kanál {channel} vytvořen s přístupem pro roli **{role}**.\n • Počet overwrites: **{perms}**"
-    channel_create_rate = "Po kolika perms updatovat progress bar."
 
     # WEEK
     week_brief = "Vypíše, kolikátý je zrovna týden a jestli je sudý nebo lichý"
@@ -410,22 +494,6 @@ class Messages:
     CarnationPink VioletRed Rhodamine Mulberry RedViolet Thistle Orchid DarkOrchid RoyalPurple BlueViolet
     Periwinkle CadetBlue CornflowerBlue MidnightBlue Cerulean Emerald JungleGreen SeaGreen ForestGreen
     PineGreen LimeGreen YellowGreen SpringGreen OliveGreen RawSienna"""
-
-    # SUBSCRIPTIONS
-    subscribe_brief = "Přihlášení k odběru zpráv kanálu do DM"
-    unsubscribe_brief = "Odhlášení odběru zpráv do DM"
-    subscribeable_brief = "Výpis kanálů které je možné sledovat"
-    subscriptions_user_brief = "Výpis odběrů zpráv uživatele"
-    subscriptions_channel_brief = "Výpis odběrů zpráv kanálu"
-    subscriptions_embed_name = "Informace o zprávě"
-    subscriptions_embed_value = "Zpráva obsahuje přílohy."
-    subscriptions_message_link = "Odkaz na zprávu"
-    subscriptions_unsubscribable = "Tento kanál odebírat nemůžeš."
-    subscriptions_already_subscribed = "Tuto místnost již odebíráš."
-    subscriptions_new_subscription = "Upozornění na nové zprávy ti budu posílat do DM."
-    subscriptions_not_subscribed = "Tuto místnost neodebíráš."
-    subscriptions_unsubscribed = "Nová upozornění na zprávy ti už posílat nebudu."
-    subscriptions_none = "Nebyly nalezeny žádné výsledky."
 
     # STUDIJNI
     studijni_brief = "Úřední hodiny studijního Oddělení"
@@ -468,7 +536,7 @@ class Messages:
 
     # ICONS
     icon_ui = "UI pro přiřazení ikony"
-    icon_set_success = "Užiteli {user} nastavena ikona {icon}"
+    icon_set_success = "Změna ikony na {icon} proběhla úspěšně"
     icon_set_no_role = "Vstup neodpovídá žádné možné ikoně"
     icon_ui_choose = "Vyber si ikonu"
     icon_ui_fail = "Nastavit ikonu se nepodařilo"
@@ -485,7 +553,7 @@ class Messages:
     timeout_remove_brief = "Předčasně odebere umlčení uživateli."
     timeout_remove = "Umlčení zrušeno uživateli {user}."
     timeout_bad_format = "Neznamý formát času. Možné formáty:\n**3** - celé hodiny\n**0.5** - necelé hodiny, použij tečku\n**Datum konce:**\n{format}"
-    timeout_permission = "Na umlčení **{user}** nemám práva."
+    timeout_permission = "Na umlčení **{user_list}** nemám práva."
     timeout_negative_time = "Čas nemůže být záporný."
     timeout_overflow = "Příliš velký počet hodin. Použij formát datumu."
     timeout_user_brief = "Použij tag uživatele/uživatelů"
@@ -514,3 +582,57 @@ class Messages:
     fun_duck_brief = "Pošle náhodný obrázek kachny"
     fun_dadjoke_brief = "Pošle náhodný dadjoke nebo vyhledá podle zadaného slova"
     fun_yo_mamajoke_brief = "Pošle náhodný Yo momma joke"
+    fun_fuchs_brief = "Pošle náhodnou fuchs reakci"
+    fun_fuchs_no_reaction = "Žádná fuchs reakce není k dispozici"
+
+    # REPORT COG
+    report_brief = "Systém pro reportování uživatelů nebo problémů na serveru"
+    report_general_brief = "Nahlaš anonymně obecný problém moderátorům"
+    report_google_form = "https://forms.gle/dkyb9eunjkJYTQdHA"
+    report_google_form_brief = "Pošle odkaz na google form pro anonymní report"
+    report_modal_placeholder = "Zadej důvod reportu"
+    report_modal_success = "Report byl úspěšně odeslán"
+    report_answer = "Zadej zprávu pro uživatele"
+    report_answer_title = "Answer to report #{id}"
+    report_answer_success = "Zpráva byla úspěšně odeslána"
+    report_banned = "Bylo ti zakázáno posílat reporty z důvodu spamu falešných reportů. Pro další řešení kontaktuj moderátory"
+    report_unban_user_brief = "Povolí uživateli posílat reporty"
+    report_unban_user = "Uživatel {user} může opět posílat reporty"
+    report_embed_answered = "### --- Last message ---\n{last_answer}\n\n### --- Current message ---\n\n{answer}"
+    report_message_brief = "Nahlaš anonymně zprávu moderátorům"
+    report_message_param = "Url zprávy nebo ID"
+    report_message_embed = "### ---  Original message content ---\n{content}\n\n### --- Report reason ---\n\n{reason}"
+    report_message_not_found = "Zpráva nebyla nalezena, zkontroluj že jsi dal správné url"
+    report_message_already_deleted = "### Nahlášená zpráva byla už smazána @{author}"
+    report_message_deleted = "### Nahlášená zpráva byla už smazána uživatelem @{author}"
+    report_message_spam = "### Report #{id}, označen jako spam uživatelem @{author}"
+    report_message_not_spam = "### Report #{id}, označení jako spam bylo zrušeno uživatelem @{author}"
+    report_already_solved = "Report #{id} už byl uzavřen. V případě potřeby otevři další report"
+    report_unresolved = "### Report #{id} was unresolved by @{author}"
+    report_check_dm = "Odesílám report ..."
+    report_files_too_big = "Soubory přesahující upload limit:\n- {files}"
+
+    # SUBSCRIPTIONS COG
+    subscription_add_brief = "Přidá odběr na vlákna se zvoleným tagem"
+    subscription_remove_brief = "Zruší odběr na vlákna se zvoleným tagem"
+    subscription_list_brief = "Zobrazí tvé odběry vláken"
+    subscription_tag_not_found = "Pro zvolené fórum {channel} nebyl nalezen tag `{tag}`"
+    subscription_added = "Odběr byl úspěšně nastaven pro {channel} s tagem `{tag}`"
+    subscription_removed = "Odběr byl úspěšně odebrán pro {channel} s tagem `{tag}`"
+    subscription_list_title = "Tvé odběry:"
+    subscription_already_subscribed = "Tento odběr již máš nastaven"
+    subscription_not_found = "Odběr s tímto tagem `{tag}` nebyl nalezen"
+    subscription_embed_title = "Nový odebíraný příspěvek"
+    subscription_embed_channel = "Příspěvek"
+    subscription_embed_tags = "Tagy"
+    subscription_embed_author = "Autor"
+
+    # MESSAGE COG
+    message_send_brief = "Pošle zprávu do kanálu"
+    message_resend_brief = "Přepošle existující zprávu do kanálu"
+    message_channel_brief = "Kanál, do kterého se má zpráva poslat"
+    message_url_brief = "Url zprávy, která se má přeposlat"
+    message_edit_brief = "Upraví existující zprávu"
+    message_sent = "Zpráva byla odeslána do kanálu {channel}"
+    message_not_found = "Zpráva nebyla nalezena"
+    message_too_long = "Zpráva přesahuje limit 2000 znaků"

@@ -18,10 +18,8 @@ import utils
 from cogs.base import Base
 from config import cooldowns
 from config.messages import Messages
-from repository import vote_repo
-from utils import fill_message, is_command_message, str_emoji_id
-
-vote_r = vote_repo.VoteRepository()
+from database.vote import VoteDB
+from utils import is_command_message, str_emoji_id
 
 
 class VoteMessage:
@@ -99,7 +97,7 @@ class Vote(Base, commands.Cog):
         self.vote_cache: Dict[int, VoteMessage] = {}
 
     async def load_cached(self):
-        db_votes = vote_r.get_pending_votes()
+        db_votes = VoteDB.get_pending_votes()
         for v in db_votes:
             try:
                 chan = await utils.get_or_fetch_channel(self.bot, v.channel_id)
@@ -130,7 +128,7 @@ class Vote(Base, commands.Cog):
             await ctx.send(Messages.vote_bad_format)
             return
         except VoteMessage.NotEmojiError as e:
-            await ctx.send(Messages.vote_not_emoji.format(opt=str(e)))
+            await ctx.send(Messages.vote_not_emoji(opt=str(e)))
             return
 
         if parsed_vote.end_date is not None and parsed_vote.end_date < datetime.now():
@@ -138,14 +136,14 @@ class Vote(Base, commands.Cog):
             return
 
         self.vote_cache[ctx.message.id] = parsed_vote
-        vote_r.add_vote(ctx.message.id, ctx.channel.id, parsed_vote.end_date, one_of)
+        VoteDB.add_vote(ctx.message.id, ctx.channel.id, parsed_vote.end_date, one_of)
         ret = await self.init_vote(ctx.message)
         if ret:
             # init_failed: remove vote from DB and cache
-            vote_r.finish_vote(ctx.message.id)
+            VoteDB.remove(ctx.message.id)
             del self.vote_cache[ctx.message.id]
             match = re.search(f"<:(.*):{ret}>", message)
-            await ctx.send(utils.fill_message("emote_not_found", emote=match.group(1)))
+            await ctx.send(Messages.emote_not_found(emote=match.group(1)))
         else:
             await ctx.send(Messages.vote_none)
 
@@ -190,13 +188,13 @@ class Vote(Base, commands.Cog):
 
         if emoji_str not in vote.options:
             msg = await chan.fetch_message(payload.message_id)
-            usr = await self.bot.get_or_fetch_user(self.bot, payload.user_id)
+            usr = await self.bot.get_or_fetch_user(payload.user_id)
             await msg.remove_reaction(payload.emoji, usr)
             return
 
         if vote.is_one_of:
             msg: Message = await chan.fetch_message(payload.message_id)
-            usr = await self.bot.get_or_fetch_user(self.bot, payload.user_id)
+            usr = await self.bot.get_or_fetch_user(payload.user_id)
             for r in msg.reactions:
                 if str_emoji_id(r.emoji) == emoji_str:
                     continue
@@ -250,28 +248,38 @@ class Vote(Base, commands.Cog):
         if len(all_most_voted) == 1:
             option = all_most_voted[0]
 
-            return singularise(
-                fill_message(
-                    "vote_result" if final else "vote_winning",
+            if final:
+                return singularise(Messages.vote_result(
                     winning_emoji=(
                         option.emoji if option.is_unicode else str(self.bot.get_emoji(int(option.emoji)))
                     ),
                     winning_option=option.message,
                     votes=option.count,
-                    question=vote.question,
-                )
-            )
+                    question=vote.question))
+            else:
+                return singularise(Messages.vote_winning(
+                    winning_emoji=(
+                        option.emoji if option.is_unicode else str(self.bot.get_emoji(int(option.emoji)))
+                    ),
+                    winning_option=option.message,
+                    votes=option.count))
         else:
             emoji_str = ""
             for e in all_most_voted:
                 emoji_str += (e.emoji if e.is_unicode else str(self.bot.get_emoji(int(e.emoji)))) + ", "
             emoji_str = emoji_str[:-2]
-            return singularise(fill_message(
-                "vote_result_multiple" if final else "vote_winning_multiple",
-                winning_emojis=emoji_str,
-                votes=most_voted,
-                question=vote.question
-            ))
+
+            if final:
+                return singularise(Messages.vote_result_multiple(
+                    winning_emojis=emoji_str,
+                    votes=most_voted,
+                    question=vote.question
+                ))
+            else:
+                return singularise(Messages.vote_winning_multiple(
+                    winning_emojis=emoji_str,
+                    votes=most_voted
+                ))
 
     async def update_bot_vote_message(self, vote_msg: Message, channel: TextChannel):
         vote = self.vote_cache[vote_msg.id]
@@ -290,7 +298,7 @@ class Vote(Base, commands.Cog):
         vote = self.vote_cache[message_id]
         chan = await utils.get_or_fetch_channel(self.bot, channel_id)
         await chan.send(content=self.get_message(vote, True))
-        vote_r.finish_vote(message_id)
+        VoteDB.remove(message_id)
 
 
 def setup(bot):

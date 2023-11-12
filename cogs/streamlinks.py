@@ -17,14 +17,12 @@ import utils
 from buttons.embed import EmbedView
 from cogs.base import Base
 from config import cooldowns
-from config.app_config import config
 from config.messages import Messages
+from database.review import SubjectDB
+from database.streamlinks import StreamLinkDB
 from features.list_message_sender import send_list_of_messages
 from features.prompt import PromptSession
 from permissions import permission_check, room_check
-from repository.database.stream_link import StreamLink
-from repository.review_repo import ReviewRepository
-from repository.stream_links_repo import StreamLinksRepo
 
 # Pattern: "AnyText | [Subject] Page: CurrentPage / {TotalPages}"
 pagination_regex = re.compile(r'^\[([^\]]*)\]\s*Page:\s*(\d*)\s*\/\s*(\d*)')
@@ -46,11 +44,9 @@ class StreamLinks(Base, commands.Cog):
         global subjects, subjects_with_stream
         super().__init__()
         self.bot = bot
-        self.review_repo = ReviewRepository()
-        self.streamlinks_repo = StreamLinksRepo()
         self.check = room_check.RoomCheck(bot)
-        subjects = self.review_repo.get_all_subjects()
-        subjects_with_stream = self.streamlinks_repo.get_subjects_with_stream()
+        subjects = SubjectDB.get_all()
+        subjects_with_stream = StreamLinkDB.get_subjects_with_stream()
 
     @cooldowns.default_cooldown
     @commands.group(aliases=[
@@ -59,7 +55,7 @@ class StreamLinks(Base, commands.Cog):
     async def streamlinks(self, ctx: commands.Context):
         if ctx.invoked_subcommand is None:
             command_id = utils.get_command_id(self, "streamlinks")
-            await ctx.reply(utils.fill_message("moved_command", name="streamlinks", id=command_id))
+            await ctx.reply(Messages.moved_command(name="streamlinks", id=command_id))
 
     @cooldowns.default_cooldown
     @commands.slash_command(name="streamlinks", brief=Messages.streamlinks_brief)
@@ -72,7 +68,7 @@ class StreamLinks(Base, commands.Cog):
         inter: disnake.ApplicationCommandInteraction,
         subject: str = commands.Param(autocomplete=autocomp_subjects_with_stream)
     ):
-        streamlinks = self.streamlinks_repo.get_streamlinks_of_subject(subject.lower())
+        streamlinks = StreamLinkDB.get_streamlinks_of_subject(subject.lower())
 
         if len(streamlinks) == 0:
             await inter.edit_original_response(content=Messages.streamlinks_no_stream)
@@ -90,7 +86,7 @@ class StreamLinks(Base, commands.Cog):
         inter: disnake.ApplicationCommandInteraction,
         subject: str = commands.Param(autocomplete=autocomp_subjects_with_stream)
     ):
-        streamlinks: List[StreamLink] = self.streamlinks_repo.get_streamlinks_of_subject(subject.lower())
+        streamlinks: List[StreamLinkDB] = StreamLinkDB.get_streamlinks_of_subject(subject.lower())
 
         if len(streamlinks) == 0:
             await inter.send(content=Messages.streamlinks_no_stream)
@@ -127,9 +123,9 @@ class StreamLinks(Base, commands.Cog):
             await inter.edit_original_response(Messages.streamlinks_invalid_link)
             return
 
-        if self.streamlinks_repo.exists_link(link):
+        if StreamLinkDB.exists_link(link):
             await inter.edit_original_response(
-                utils.fill_message('streamlinks_add_link_exists', user=inter.author.id)
+                Messages.streamlinks_add_link_exists(user=inter.author.id)
             )
             return
 
@@ -144,7 +140,7 @@ class StreamLinks(Base, commands.Cog):
             if link_data['upload_date'] is None:
                 link_data['upload_date'] = datetime.utcnow()
 
-        self.streamlinks_repo.create(
+        StreamLinkDB.create(
             subject.lower(),
             link,
             user,
@@ -169,7 +165,7 @@ class StreamLinks(Base, commands.Cog):
         parameter = False
 
         embed = disnake.Embed(title="Odkaz na stream byl změněn", color=disnake.Color.yellow())
-        stream = self.streamlinks_repo.get_stream_by_id(id)
+        stream = StreamLinkDB.get_stream_by_id(id)
         embed.add_field(name="Provedl", value=inter.author)
 
         if stream is None:
@@ -231,11 +227,11 @@ class StreamLinks(Base, commands.Cog):
             await inter.edit_original_response(content=Messages.streamlinks_update_nothing_to_change)
             return
 
-        self.streamlinks_repo.merge(stream)
+        stream.merge()
 
         utils.add_author_footer(embed, inter.author)
         embed.timestamp = datetime.utcnow()
-        channel = self.bot.get_channel(config.log_channel)
+        channel = self.bot.get_channel(self.config.log_channel)
         await channel.send(embed=embed)
         await inter.edit_original_response(content=Messages.streamlinks_update_success)
 
@@ -247,20 +243,20 @@ class StreamLinks(Base, commands.Cog):
         id: int = commands.Param(description=Messages.streamlinks_ID)
     ):
 
-        if not self.streamlinks_repo.exists(id):
+        if not StreamLinkDB.exists(id):
             await inter.edit_original_response(Messages.streamlinks_not_exists)
             return
 
-        stream = self.streamlinks_repo.get_stream_by_id(id)
+        stream = StreamLinkDB.get_stream_by_id(id)
         link = stream.link
 
-        prompt_message = utils.fill_message('streamlinks_remove_prompt', link=link)
+        prompt_message = Messages.streamlinks_remove_prompt(link=link)
         result = await PromptSession(self.bot, inter, prompt_message, 60).run()
 
         if result:
             await self.log(stream, inter.author)
-            self.streamlinks_repo.remove(id)
-            await inter.channel.send(utils.fill_message('streamlinks_remove_success', link=link))
+            stream.remove()
+            await inter.channel.send(Messages.streamlinks_remove_success(link=link))
 
     async def log(self, stream, user):
         embed = disnake.Embed(title="Odkaz na stream byl smazán", color=disnake.Color.yellow())
@@ -270,7 +266,7 @@ class StreamLinks(Base, commands.Cog):
         embed.add_field(name="Popis", value=stream.description[:1024])
         embed.add_field(name="Odkaz", value=f"[link]({stream.link})", inline=False)
         embed.timestamp = datetime.utcnow()
-        channel = self.bot.get_channel(config.log_channel)
+        channel = self.bot.get_channel(self.config.log_channel)
         await channel.send(embed=embed)
 
     async def get_user_string(self, user):
@@ -319,11 +315,11 @@ class StreamLinks(Base, commands.Cog):
             if 'property' in meta.attrs and meta.attrs['property'] == 'og:image':
                 data['image'] = meta.attrs['content']
             if 'itemprop' in meta.attrs and meta.attrs['itemprop'] in ['datePublished', 'uploadDate']:
-                data['upload_date'] = datetime.strptime(meta.attrs['content'], '%Y-%m-%d')
+                data['upload_date'] = datetime.fromisoformat(meta.attrs['content'])
 
         return data
 
-    def create_embed_of_link(self, streamlink: StreamLink, author: Union[disnake.User, disnake.Member],
+    def create_embed_of_link(self, streamlink: StreamLinkDB, author: Union[disnake.User, disnake.Member],
                              links_count: int, current_pos: int) -> disnake.Embed:
         embed = disnake.Embed(color=disnake.Color.yellow())
         embed.set_author(name="Streamlinks")

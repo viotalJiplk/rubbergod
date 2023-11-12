@@ -19,10 +19,9 @@ import utils
 from buttons.embed import EmbedView
 from cogs.base import Base
 from config import cooldowns
-from config.app_config import config
 from config.messages import Messages
+from database.exams import ExamsTermsMessageDB
 from permissions import permission_check
-from repository.exams_repo import ExamsTermsMessageRepo
 
 year_regex = "[1-3][BM]IT"
 YEAR_LIST = ["1BIT", "2BIT", "3BIT", "1MIT", "2MIT"]
@@ -38,10 +37,8 @@ class Exams(Base, commands.Cog):
         self.bot = bot
 
         self.subscribed_guilds: List[int] = []
-        if config.exams_subscribe_default_guild:
-            self.subscribed_guilds.append(config.guild_id)
-
-        self.exams_repo = ExamsTermsMessageRepo()
+        if self.config.exams_subscribe_default_guild:
+            self.subscribed_guilds.append(self.config.guild_id)
 
         if self.subscribed_guilds:
             self.tasks = [self.update_terms_task.start()]
@@ -56,7 +53,7 @@ class Exams(Base, commands.Cog):
     @terms.sub_command(name="update", description=Messages.exams_update_term_brief)
     async def update(self, inter: disnake.ApplicationCommandInteraction):
         updated_chans = await self.update_exam_terms(inter.guild, inter.author)
-        await inter.edit_original_response(utils.fill_message("exams_terms_updated", num_chan=updated_chans))
+        await inter.edit_original_response(Messages.exams_terms_updated(num_chan=updated_chans))
 
     @commands.check(permission_check.mod_plus)
     @terms.sub_command(name="remove_all", description=Messages.exams_remove_all_terms_brief)
@@ -65,9 +62,9 @@ class Exams(Base, commands.Cog):
             if not isinstance(channel, disnake.TextChannel):
                 continue
 
-            for channel_name in config.exams_term_channels:
+            for channel_name in self.config.exams_term_channels:
                 if channel_name.lower() == channel.name.lower():
-                    message_ids = self.exams_repo.remove_from_channel(channel.id)
+                    message_ids = ExamsTermsMessageDB.remove_from_channel(channel.id)
                     for message_id in message_ids:
                         try:
                             message = await channel.fetch_message(message_id)
@@ -81,11 +78,11 @@ class Exams(Base, commands.Cog):
     async def remove(self, inter: disnake.ApplicationCommandInteraction, channel: disnake.TextChannel):
         if not isinstance(channel, disnake.TextChannel):
             await inter.edit_original_response(
-                utils.fill_message("exams_channel_is_not_text_channel", chan_name=channel.name)
+                Messages.exams_channel_is_not_text_channel(chan_name=channel.name)
             )
             return
 
-        message_ids = self.exams_repo.remove_from_channel(channel.id)
+        message_ids = ExamsTermsMessageDB.remove_from_channel(channel.id)
         for message_id in message_ids:
             try:
                 message = await channel.fetch_message(message_id)
@@ -96,7 +93,7 @@ class Exams(Base, commands.Cog):
         if message_ids:
             await inter.send(Messages.exams_terms_removed)
         else:
-            await inter.send(utils.fill_message("exams_nothing_to_remove", chan_name=channel.name))
+            await inter.send(Messages.exams_nothing_to_remove(chan_name=channel.name))
 
     @commands.check(permission_check.mod_plus)
     @terms.sub_command(name="start", description=Messages.exams_start_terms_brief)
@@ -110,7 +107,7 @@ class Exams(Base, commands.Cog):
             # If task is already running update terms now
             await self.update_exam_terms(inter.guild)
 
-        await inter.send(utils.fill_message("exams_automatic_update_started", guild_name=inter.guild.name))
+        await inter.send(Messages.exams_automatic_update_started(guild_name=inter.guild.name))
 
     @commands.check(permission_check.mod_plus)
     @terms.sub_command(name="stop", description=Messages.exams_stop_terms_brief)
@@ -122,9 +119,9 @@ class Exams(Base, commands.Cog):
         if not self.subscribed_guilds:
             self.update_terms_task.cancel()
 
-        await inter.send(utils.fill_message("exams_automatic_update_stopped", guild_name=inter.guild.name))
+        await inter.send(Messages.exams_automatic_update_stopped(guild_name=inter.guild.name))
 
-    @tasks.loop(hours=int(config.exams_terms_update_interval * 24))
+    @tasks.loop(hours=int(Base.config.exams_terms_update_interval * 24))
     async def update_terms_task(self):
         for guild in self.subscribed_guilds:
             guild = disnake.utils.get(self.bot.guilds, id=guild)
@@ -142,7 +139,7 @@ class Exams(Base, commands.Cog):
         return list(map(int, input))
 
     async def get_message_destination(self, channel: disnake.TextChannel, message_index: int = 0):
-        saved_messages = self.exams_repo.get_message_from_channel(channel.id)
+        saved_messages = ExamsTermsMessageDB.get_message_from_channel(channel.id)
         if saved_messages and message_index < len(saved_messages):
             if message_index < 0:
                 message_index = 0
@@ -153,7 +150,7 @@ class Exams(Base, commands.Cog):
                 dest = await channel.fetch_message(message_id)
             except disnake.NotFound:
                 # If cant find message then remove it from database
-                self.exams_repo.remove_term_message(message_id)
+                ExamsTermsMessageDB.remove_term_message(message_id)
 
             # If message is not found then set it to channel itself
             if dest is None:
@@ -170,7 +167,7 @@ class Exams(Base, commands.Cog):
             if not isinstance(channel, disnake.TextChannel):
                 continue
 
-            for channel_name in config.exams_term_channels:
+            for channel_name in self.config.exams_term_channels:
                 if channel_name.lower() == channel.name.lower():
                     if not channel_name[0].isdigit():
                         if channel_name[:3].upper() == "MIT":
@@ -283,7 +280,7 @@ class Exams(Base, commands.Cog):
         exams = body.find_all("tr")
 
         number_of_exams = len(exams)
-        bs = config.exams_page_size
+        bs = self.config.exams_page_size
         number_of_batches = math.ceil(number_of_exams / bs)
         exam_batches = [exams[i * bs: bs + i * bs] for i in range(number_of_batches)]
 
@@ -490,7 +487,7 @@ class Exams(Base, commands.Cog):
             # No previous message in channel
             send_message = await dest.send(content=src_data_string, embed=header)
             if send_message is not None:
-                self.exams_repo.create_term_message(send_message.id, send_message.channel.id)
+                ExamsTermsMessageDB.create_term_message(send_message.id, send_message.channel.id)
         else:
             # Message already exists
             await dest.edit(content=src_data_string, embed=header)

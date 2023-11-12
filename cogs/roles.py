@@ -3,6 +3,7 @@ Cog implementing channels and roles management. Copying/creating channels with p
 """
 
 import asyncio
+import io
 from typing import List, Tuple
 
 import disnake
@@ -10,14 +11,12 @@ from disnake.ext import commands
 
 import utils
 from cogs.base import Base
-from config.app_config import config
 # TODO: use messages for prints
 from config.messages import Messages
+from database.review import SubjectDetailsDB
+from database.role_group import RoleGroupDB
 from features.reaction_context import ReactionContext
 from permissions import permission_check
-from repository import review_repo, role_group_repo
-
-group_repo = role_group_repo.RoleGroupRepository()
 
 
 class Roles(Base, commands.Cog):
@@ -25,7 +24,6 @@ class Roles(Base, commands.Cog):
         super().__init__()
         self.bot = bot
         self.lock = asyncio.Lock()
-        self.repo = review_repo.ReviewRepository()
 
     # Returns list of role names and emotes that represent them
     async def get_join_role_data(self, message):
@@ -34,7 +32,7 @@ class Roles(Base, commands.Cog):
         try:
             input_string = input_string.rstrip().split("\n")
         except ValueError:
-            await message.channel.send(utils.fill_message("role_format", user=message.author.id))
+            await message.channel.send(Messages.role_format(user=message.author.id))
             return None
         output = []
         for line in input_string:
@@ -43,10 +41,9 @@ class Roles(Base, commands.Cog):
                 out = [out[1], out[0]]
                 output.append(out)
             except Exception:
-                if message.channel.id not in config.role_channels:
-                    msg = utils.fill_message(
-                        "role_invalid_line", user=message.author.id, line=disnake.utils.escape_mentions(line)
-                    )
+                if message.channel.id not in self.config.role_channels:
+                    msg = Messages.role_invalid_line(user=message.author.id,
+                                                     line=disnake.utils.escape_mentions(line))
                     await message.channel.send(msg)
         for line in output:
             if "<#" in line[0] or "<@" in line[0]:
@@ -57,9 +54,8 @@ class Roles(Base, commands.Cog):
                 try:
                     line[0] = int(line[0])
                 except Exception:
-                    if message.channel.id not in config.role_channels:
-                        msg = utils.fill_message(
-                            "role_invalid_line",
+                    if message.channel.id not in self.config.role_channels:
+                        msg = Messages.role_invalid_line(
                             user=message.author.id,
                             line=disnake.utils.escape_mentions(line[0]),
                         )
@@ -70,22 +66,22 @@ class Roles(Base, commands.Cog):
     async def message_role_reactions(self, message, data):
         if message.channel.type is not disnake.ChannelType.text:
             await message.channel.send(Messages.role_not_on_server)
-            guild = self.bot.get_guild(config.guild_id)
+            guild = self.bot.get_guild(self.config.guild_id)
         else:
             guild = message.guild
         for line in data:
             roles, channels = self.get_target(line[0], guild)
             if roles == [None] and channels == [None]:
-                msg = utils.fill_message(
-                    "role_not_role", user=message.author.id, not_role=disnake.utils.escape_mentions(line[0])
+                msg = Messages.role_not_role(
+                    user=message.author.id,
+                    not_role=disnake.utils.escape_mentions(line[0])
                 )
                 await message.channel.send(msg)
             else:
                 try:
                     await message.add_reaction(line[1])
                 except disnake.errors.HTTPException:
-                    msg = utils.fill_message(
-                        "role_invalid_emote",
+                    msg = Messages.role_invalid_emote(
                         user=message.author.id,
                         not_emote=disnake.utils.escape_mentions(line[1]),
                         role=disnake.utils.escape_mentions(line[0]),
@@ -119,7 +115,7 @@ class Roles(Base, commands.Cog):
 
                 total_overwrites = len(channel.overwrites)
                 if total_overwrites >= 490:
-                    await member.send(utils.fill_message("role_migration_allert", channel=channel))
+                    await member.send(Messages.role_migration_allert(channel=channel))
                     async with self.lock:
                         role = disnake.utils.get(guild.roles, name=channel.name)
                         if not role:
@@ -142,10 +138,9 @@ class Roles(Base, commands.Cog):
         default_perm.view_channel = True
         total_overwrites = len(channel.overwrites)
         rate = 50
-        guild = self.bot.get_guild(config.guild_id)
-        bot_dev = guild.get_channel(config.bot_dev_channel)
+        guild = self.bot.get_guild(self.config.guild_id)
         role = await guild.create_role(name=channel.name)
-        message = await bot_dev.send(utils.fill_message("role_create_start", role=role.name))
+        message = await self.bot_dev_channel.send(Messages.role_create_start(role=role.name))
         for idx, item in enumerate(channel.overwrites):
             if type(item) == disnake.Member:
                 if ignore and ignore.id == item.id:
@@ -159,8 +154,7 @@ class Roles(Base, commands.Cog):
 
             if (idx % rate == 0):
                 await message.edit(
-                    utils.fill_message(
-                        "role_create_progress",
+                    Messages.role_create_progress(
                         channel=channel.name,
                         perms=total_overwrites,
                         progress=utils.create_bar(idx + 1, total_overwrites),
@@ -178,8 +172,7 @@ class Roles(Base, commands.Cog):
             await channel.set_permissions(item, overwrite=keep[item])
 
         await message.edit(
-            utils.fill_message(
-                "role_create_done",
+            Messages.role_create_done(
                 role=role.name,
                 perms=len(role.members)
             )
@@ -206,7 +199,7 @@ class Roles(Base, commands.Cog):
 
             total_overwrites = len(channel.overwrites)
             if total_overwrites >= 490:
-                await member.send(utils.fill_message("role_migration_allert", channel=channel))
+                await member.send(Messages.role_migration_allert(channel=channel))
                 async with self.lock:
                     role = disnake.utils.get(guild.roles, name=channel.name)
                     if not role:
@@ -228,7 +221,7 @@ class Roles(Base, commands.Cog):
     def get_target(self, target, guild) -> Tuple[List[disnake.Role], List[disnake.abc.GuildChannel]]:
         """Detect if target is a channel a role or a group."""
         # Try a group first
-        group = group_repo.get_group(target)
+        group = RoleGroupDB.get_group(target)
         if group is not None:
             roles, channels = [], []
             for role_id in group.role_ids:
@@ -258,15 +251,15 @@ class Roles(Base, commands.Cog):
         return [role], [channel]
 
     @commands.check(permission_check.mod_plus)
-    @commands.slash_command(name="do_da_thing", description='hodi prdeli', guild_ids=[config.guild_id])
+    @commands.slash_command(name="do_da_thing", description='hodi prdeli', guild_ids=[Base.config.guild_id])
     async def do_da_thing(self, inter: disnake.ApplicationCommandInteraction):
-        guild = self.bot.get_guild(config.guild_id)
-        logChan = self.bot.get_channel(config.log_channel)
+        guild = self.bot.get_guild(self.config.guild_id)
+        logChan = self.bot.get_channel(self.config.log_channel)
         for channel in guild.channels:
             if channel.type == disnake.ChannelType.text:
                 boolik = '-' in channel.name
                 name = channel.name.split('-')[0] if boolik else channel.name
-                sub = self.repo.get_subject_details(name)
+                sub = SubjectDetailsDB.get(name)
                 if sub:
                     newName = sub.name + ', but ' + '-'.join(channel.name.split('-')[1:])
                     if channel.topic:
@@ -276,33 +269,33 @@ class Roles(Base, commands.Cog):
                         await channel.edit(topic=sub.name if not boolik else newName)
 
     @commands.check(permission_check.mod_plus)
-    @commands.slash_command(name="group", guild_ids=[config.guild_id])
+    @commands.slash_command(name="group", guild_ids=[Base.config.guild_id])
     async def group(self, inter):
         pass
 
     @group.sub_command(name="add", description=Messages.group_add)
     async def add_group(self, inter, name: str):
-        group = group_repo.get_group(name)
+        group = RoleGroupDB.get_group(name)
         if group is not None:
             await inter.send(f"Groupa s názvem {name} už existuje.")
             return
-        group_repo.add_group(name)
+        RoleGroupDB.add_group(name)
         await inter.send(f"Pridal jsem groupu {name}.")
 
     @group.sub_command(name="get", description=Messages.group_get)
     async def get_group(self, inter, name: str):
-        group = group_repo.get_group(name)
+        group = RoleGroupDB.get_group(name)
         channels = ", ".join([f"<#{channel_id}>" for channel_id in group.channel_ids])
         await inter.send(f"Jmeno: {group.name}\n" f"Channel IDs: {channels}\n" f"Role IDs:{group.role_ids}")
 
     @group.sub_command(name="delete", description=Messages.group_delete)
     async def delete_group(self, inter, name: str):
-        group_repo.group_delete(name)
+        RoleGroupDB.group_delete(name)
         await inter.send(f"Odebral jsem groupu {name}")
 
     @group.sub_command(name="list", description=Messages.group_list)
     async def groups(self, inter):
-        names = group_repo.group_names()
+        names = RoleGroupDB.group_names()
         groups = "\n".join(names)
         output = utils.cut_string_by_words(groups, 1900, "\n")
         await inter.send(f"```md\n# ACTIVE GROUPS:\n{output[0]}```")
@@ -311,26 +304,26 @@ class Roles(Base, commands.Cog):
 
     @group.sub_command(name="add_channel_id", description=Messages.group_add_channel_id)
     async def add_channel_id(self, inter, name: str, channel_id: str):
-        group_repo.group_add_channel_id(name, channel_id)
+        RoleGroupDB.group_add_channel_id(name, channel_id)
         await inter.send("Done")
 
     @group.sub_command(name="add_role_id", description=Messages.group_add_role_id)
     async def add_role_id(self, inter, name: str, role_id: str):
-        group_repo.group_add_role_id(name, role_id)
+        RoleGroupDB.group_add_role_id(name, role_id)
         await inter.send("Done")
 
     @group.sub_command(name="reset_channels", description=Messages.group_reset_channels)
     async def group_reset_channels(self, inter, name: str):
-        group_repo.group_reset_channels(name)
+        RoleGroupDB.group_reset_channels(name)
         await inter.send("Done")
 
     @group.sub_command(name="reset_roles", description=Messages.group_reset_roles)
     async def group_reset_roles(self, inter, name: str):
-        group_repo.group_reset_roles(name)
+        RoleGroupDB.group_reset_roles(name)
         await inter.send("Done")
 
     @commands.check(permission_check.mod_plus)
-    @commands.slash_command(name="channel", guild_ids=[config.guild_id])
+    @commands.slash_command(name="channel", guild_ids=[Base.config.guild_id])
     async def channel(self, inter):
         pass
 
@@ -351,7 +344,7 @@ class Roles(Base, commands.Cog):
         """Clone channel with same permissions as src."""
         await inter.send(Messages.channel_clone_start)
         new = await src.clone(name=name)
-        await inter.edit_original_response(utils.fill_message("channel_clone_done", id=new.id))
+        await inter.edit_original_response(Messages.channel_clone_done(id=new.id))
 
     @channel.sub_command(name="create", description=Messages.role_channel_create_brief)
     async def create(
@@ -359,7 +352,7 @@ class Roles(Base, commands.Cog):
         inter: disnake.ApplicationCommandInteraction,
         channel_name,
         role: disnake.Role,
-        rate: int = commands.Param(ge=1, description=Messages.channel_create_rate),
+        rate: int = commands.Param(ge=1, default=10, description=Messages.channel_rate),
         category: disnake.CategoryChannel = None
     ):
 
@@ -376,20 +369,155 @@ class Roles(Base, commands.Cog):
                 )
 
         await inter.edit_original_response(
-            utils.fill_message(
-                "channel_create_done",
+            Messages.channel_create_done(
                 channel=channel.mention,
                 role=role.name,
                 perms=len(role.members)
             )
         )
 
+    @channel.sub_command(name="get_overwrites", description=Messages.channel_get_overwrites_brief)
+    async def get_overwrites(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        rate: int = commands.Param(ge=1, default=10, description=Messages.channel_rate),
+    ):
+        """Get channels and count of user overwrites with view_channel=True."""
+        await inter.send(Messages.channel_get_overwrites_start)
+        total_overwrites = 0
+        user_overwrites = 0
+        channels_output = {}
+        for index, channel in enumerate(inter.guild.channels):
+            channel_user_overwrites = {
+                member: permission for member, permission in channel.overwrites.items()
+                if not isinstance(member, disnake.Role) and permission.view_channel
+            }
+            channel_overwrites = {
+                role_or_member: permission for role_or_member, permission in channel.overwrites.items()
+            }
+            channels_output[channel] = f"user:{len(channel_user_overwrites)}, all: {len(channel_overwrites)}"
+            if (index % rate == 0):
+                await inter.edit_original_response(
+                    f"• kanálů: {index+1}/{len(inter.guild.channels)}\n"
+                    f"{utils.create_bar(index+1, len(inter.guild.channels))}"
+                )
+            user_overwrites += len(channel_user_overwrites)
+            total_overwrites += len(channel_overwrites)
+
+        output = []
+        channels_output = dict(sorted(channels_output.items(), key=lambda item: item[1], reverse=True))
+        with io.StringIO() as output:
+            output.write(f"User overwrites total:{user_overwrites}\n")
+            output.write(f"Total overwrites:{total_overwrites}\n\n")
+            for channel, overwrites in channels_output.items():
+                if isinstance(channel, disnake.CategoryChannel):
+                    output.write(f"#{channel.name}(kategorie) - {overwrites}\n")
+                else:
+                    output.write(f"#{channel.name} - {overwrites}\n")
+            output.seek(0)
+
+            await inter.channel.send(file=disnake.File(output, filename="overwrites.txt"))
+        await inter.edit_original_response(Messages.channel_get_overwrites_done)
+
+    @channel.sub_command(
+        name="overwrites_to_role",
+        description=Messages.channel_overwrites_to_role_brief
+    )
+    async def overwrites_to_role(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        channel: disnake.TextChannel,
+        rate: int = commands.Param(ge=1, default=10, description=Messages.channel_rate),
+    ):
+        """
+        Create a new role with the same name as channel name.
+        Give users with view_channel=True this role.
+        Remove overwrites.
+        """
+        await inter.send(Messages.channel_overwrites_to_role_start)
+        new_role = await inter.guild.create_role(name=channel.name)
+        await channel.set_permissions(
+            target=new_role,
+            overwrite=disnake.PermissionOverwrite(view_channel=True)
+        )
+        channel_user_overwrites = {
+            member: permission for member, permission in channel.overwrites.items()
+            if not isinstance(member, disnake.Role) and permission.view_channel
+        }
+        for index, member in enumerate(channel_user_overwrites):
+            await channel.set_permissions(member, overwrite=None)
+            await member.add_roles(new_role)
+            if (index % rate == 0):
+                await inter.edit_original_response(
+                    f"• overwrites: {index+1}/{len(channel_user_overwrites)}\n"
+                    f"{utils.create_bar(index+1, len(channel_user_overwrites))}"
+                )
+        await inter.edit_original_response(Messages.channel_overwrites_to_role_done)
+
+    @channel.sub_command(
+        name="role_to_overwrites",
+        description=Messages.channel_role_to_overwrites_brief
+    )
+    async def role_to_overwrites(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        role: disnake.Role,
+        channel: disnake.TextChannel,
+        rate: int = commands.Param(ge=1, default=10, description=Messages.channel_rate),
+    ):
+        """
+        Create user overwrites from role for specific channel
+        Give users view_channel=True who had this role.
+        Remove role.
+        """
+        await inter.send(Messages.channel_role_to_overwrites_start)
+        members = role.members
+        await role.delete()
+
+        for index, member in enumerate(members):
+            await channel.set_permissions(member, view_channel=True)
+            if (index % rate == 0):
+                await inter.edit_original_response(
+                    f"• overwrites: {index+1}/{len(members)}\n"
+                    f"{utils.create_bar(index+1, len(members))}"
+                )
+        await inter.edit_original_response(Messages.channel_role_to_overwrites_done)
+
+    @commands.check(permission_check.mod_plus)
+    @commands.slash_command(name="remove_exclusive_roles", description=Messages.remove_exclusive_roles)
+    async def remove_exclusive_roles(
+        self,
+        inter: disnake.ApplicationCommandInteraction,
+        keep_role: disnake.Role,
+        remove_role: disnake.Role = commands.Param(description=Messages.role_to_remove),
+        rate: int = commands.Param(ge=1, default=10, description=Messages.channel_rate),
+    ):
+        """Find people who have both roles and remove their remove_role."""
+        await inter.send(Messages.remove_exclusive_roles_start(role1=keep_role.name, role2=remove_role.name))
+        role1_members = keep_role.members
+        role2_members = remove_role.members
+
+        members = set(role1_members).intersection(role2_members)
+
+        if not members:
+            await inter.send(Messages.role_no_exlusives)
+            return
+
+        for index, member in enumerate(members):
+            await member.remove_roles(remove_role)
+            if (index % rate == 0):
+                await inter.edit_original_response(
+                    f"• members: {index+1}/{len(members)}\n"
+                    f"{utils.create_bar(index+1, len(members))}"
+                )
+        await inter.edit_original_response(Messages.remove_exclusive_roles_done)
+
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.author.bot:
             return
 
-        if message.channel.id in config.role_channels:
+        if message.channel.id in self.config.role_channels:
             role_data = await self.get_join_role_data(message)
             await self.message_role_reactions(message, role_data)
 
@@ -408,7 +536,7 @@ class Roles(Base, commands.Cog):
         if ctx is None:
             return
 
-        if ctx.channel.id in config.role_channels:
+        if ctx.channel.id in self.config.role_channels:
             role_data = await self.get_join_role_data(ctx.message)
             for line in role_data:
                 if str(ctx.emoji) == line[1]:

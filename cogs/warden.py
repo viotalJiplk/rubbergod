@@ -14,13 +14,11 @@ from PIL import Image
 
 import utils
 from cogs.base import Base
-from config.app_config import config
 from config.messages import Messages
+from database.image import ImageDB
 from permissions import permission_check
-from repository import image_repo
 
 dhash.force_pil()
-repo_i = image_repo.ImageRepository()
 
 
 class Warden(Base, commands.Cog):
@@ -38,7 +36,7 @@ class Warden(Base, commands.Cog):
 
     def doCheckRepost(self, message: disnake.Message):
         return (
-            message.channel.id in config.deduplication_channels
+            message.channel.id in self.config.deduplication_channels
             and message.attachments is not None
             and len(message.attachments) > 0
             and not message.author.bot
@@ -53,16 +51,19 @@ class Warden(Base, commands.Cog):
     @commands.Cog.listener()
     async def on_message_delete(self, message: disnake.Message):
         if self.doCheckRepost(message):
-            repo_i.deleteByMessage(message.id)
+            ImageDB.deleteByMessage(message.id)
 
             # try to detect repost embed
             messages = await message.channel.history(after=message, limit=10, oldest_first=True).flatten()
             for mess in messages:
                 if not mess.author.bot:
                     continue
+                if not mess.embeds:
+                    continue
                 try:
                     if str(message.id) == mess.embeds[0].footer.text:
                         await mess.delete()
+                        break
                 except disnake.NotFound:
                     continue
 
@@ -70,12 +71,12 @@ class Warden(Base, commands.Cog):
         """Delete duplicate embed if original is not a duplicate"""
         message = ctx.message
 
-        if ctx.member.id in config.repost_ignore_users:
+        if ctx.member.id in self.config.repost_ignore_users:
             await message.remove_reaction("❎", ctx.member)
             return
 
         for react in message.reactions:
-            if react.emoji == "❎" and react.count >= config.duplicate_limit:
+            if react.emoji == "❎" and react.count >= self.config.duplicate_limit:
                 try:
                     orig = message.embeds[0].footer.text
                     orig = await message.channel.fetch_message(int(orig))
@@ -100,7 +101,7 @@ class Warden(Base, commands.Cog):
                 continue
             img_hash = dhash.dhash_int(image)
 
-            repo_i.add_image(
+            ImageDB.add_image(
                 channel_id=message.channel.id,
                 message_id=message.id,
                 attachment_id=f.id,
@@ -143,7 +144,7 @@ class Warden(Base, commands.Cog):
             "Processed **{}** of **{}** messages ({:.1f} %)\n"
             "Computed **{}** hashes"
         )
-        msg = await ctx.send(title.format(len(messages)))
+        msg = await ctx.send(title(len(messages)))
 
         ctr_nofile = 0
         ctr_hashes = 0
@@ -153,7 +154,7 @@ class Warden(Base, commands.Cog):
             # update info on every 10th message
             if i % 50 == 0:
                 await msg.edit(
-                    content=template.format(i, len(messages), (i / len(messages) * 100), ctr_hashes)
+                    content=template(i, len(messages), (i / len(messages) * 100), ctr_hashes)
                 )
 
             if len(message.attachments) == 0:
@@ -183,7 +184,7 @@ class Warden(Base, commands.Cog):
             return
 
         duplicates = {}
-        posts = repo_i.getAll()
+        posts = ImageDB.getAll()
         for img_hash in hashes:
             hamming_min = 128
             duplicate = None
@@ -221,7 +222,7 @@ class Warden(Base, commands.Cog):
         prob = "{:.1f} %".format((1 - hamming / 128) * 100)
         timestamp = utils.id_to_datetime(original.attachment_id).strftime("%Y-%m-%d %H:%M:%S")
 
-        src_chan = self.bot.get_guild(config.guild_id).get_channel(original.channel_id)
+        src_chan = self.bot.get_guild(self.config.guild_id).get_channel(original.channel_id)
         try:
             src_post = await src_chan.fetch_message(original.message_id)
             link = src_post.jump_url
@@ -230,13 +231,13 @@ class Warden(Base, commands.Cog):
             link = "404 <:sadcat:576171980118687754>"
             author = "_??? (404)_"
 
-        desc = utils.fill_message("repost_description", user=message.author.id, value=prob)
+        desc = Messages.repost_description(user=message.author.id, value=prob)
         embed = disnake.Embed(title=title, color=0xCB410B, description=desc, url=message.jump_url)
         embed.add_field(name=f"**{author}**, {timestamp}", value=link, inline=False)
 
         embed.add_field(
             name=Messages.repost_title,
-            value="_" + utils.fill_message("repost_content", limit=config.duplicate_limit) + "_",
+            value="_" + Messages.repost_content(limit=self.config.duplicate_limit) + "_",
         )
         embed.set_footer(text=message.id)
         send = await message.channel.send(embed=embed)
